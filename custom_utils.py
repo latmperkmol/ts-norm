@@ -164,6 +164,7 @@ def check_for_clouds(dir=".", tolerance=0.5):
             with open(os.path.join(dirpath, filename)) as file:
                 metadata = json.load(file)
                 cloud.append(metadata["properties"]["cloud_cover"])
+
     cloud_frac = sum(cloud)/len(cloud)
     if cloud_frac <= tolerance and cloud_frac >= 0.0:
         return True
@@ -257,12 +258,18 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
         if (abs(xres_big) != abs(xres_target)) or (abs(yres_big) != abs(yres_target)):
             print "Downsampling target image..."
             # generate name for downsampled version of image
-            if input_target.endswith('tiff'):
+            # TODO: make this robust against capitalization and add a better "else" clause
+            if input_target.lower().endswith('tiff'):
                 downsampled_target = input_target[:-5] + "_downsample.tif"
-            elif input_target.endswith('tif'):
+            elif input_target.lower().endswith('tif'):
                 downsampled_target = input_target[:-4] + "_downsample.tif"
+            else:
+                print "It looks like the file extension was " + input_target[:-4]
+                print "Was expecting .tif or .tiff. Try again."
+                return
             # perform downsampling
-            call('gdalwarp -tr ' + str(abs(xres_big)) + ' ' + str(abs(yres_big)) + ' -r average ' + input_target + ' ' + downsampled_target, shell=True)
+            call('gdalwarp -tr ' + str(abs(xres_big)) + ' ' + str(abs(yres_big)) + ' -r average ' + input_target + ' '
+                 + downsampled_target, shell=True)
             # reset data, grab new extent
             data_target = gdal.Open(downsampled_target, GA_ReadOnly)
             geoTransform = data_target.GetGeoTransform()

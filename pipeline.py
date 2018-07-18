@@ -14,6 +14,7 @@ Given AOI(s) and a target date, this will:
 """
 
 import numpy as np
+import numpy.ma as ma
 import matplotlib.pyplot as plt
 import gdal
 import os, shutil
@@ -29,6 +30,7 @@ from functools import partial
 from contextlib import contextmanager
 from multiprocessing import Pool
 import time
+import warnings
 
 
 def get_inputs():
@@ -38,8 +40,9 @@ def get_inputs():
     direc = raw_input("Directory for outputs: ")
     ref_dir = raw_input("Directory of (radiometric) reference scenes: ")
     planet_dir = raw_input("Directory of Planet images: ")
+    bqa_dir = raw_input("Directory of Landsat quality masks: ")   # will assume their names have not been changed
     trim = bool(raw_input("Do the Landsat images in your directory need to be cropped? 'True' or 'False': "))
-    return date_of_interest, aoi, direc, trim, ref_dir, planet_dir
+    return date_of_interest, aoi, direc, trim, ref_dir, planet_dir, bqa_dir
 
 
 def radiometric_calibration(target_img, reg_ref_img, rad_ref_img):
@@ -89,7 +92,7 @@ def fit_model_to_pixel_ts(pixel, model, dates, initial_params=0., interp_dates=[
     :param interp_dates: (list or np array) a vector with the dates to evaluate each model (i.e. dates of Planet images)
     :return: array containing the model fit
     """
-    fit_model = Model(model)
+    fit_model = Model(model, nan_policy='propagate')       # should this be "omit" instead??
     param_dict = dict()
     if initial_params != 0.:
         params = fit_model.make_params(**initial_params)
@@ -101,12 +104,20 @@ def fit_model_to_pixel_ts(pixel, model, dates, initial_params=0., interp_dates=[
             param_dict[p] = float(raw_input("Initial value for " + p + " : "))
         params = fit_model.make_params(**param_dict)
 
-    result = fit_model.fit(pixel, params, x=dates)
+    # TODO: add error handling here in case pixel is too masked (not enough data points?)
+    result = fit_model.fit(pixel, params, x=dates, nan_policy="omit")
     # make a vector with all the dates in the range. model will interpolate these values
     if interp_dates == []:
         interp_dates = np.linspace(dates[0], dates[-1], dates[-1]+1)
     interpolated_model = model(np.asarray(interp_dates), **result.best_values)
     return interpolated_model
+
+
+def landsat_data_masker(landsat_bqa_path, mask_threshold=2720):
+    landsat_bqa_array = cu.img_to_array(landsat_bqa_path)[0]
+    # True = bad data. False = good data.
+    landsat_bqa_mask = landsat_bqa_array > mask_threshold     # this could be refined to use bit order
+    return landsat_bqa_mask
 
 
 @contextmanager
@@ -117,11 +128,7 @@ def poolcontext(*args, **kwargs):
 
 
 def main():
-    doi, aoi, out_directory, trim, landsat_img_dir, planet_img_dir = get_inputs()
-
-    # TODO: replace these hardcoded directories
-    #landsat_img_dir = "E:\\Leach\\Landsat\\AFRF\\trimmed"
-    #planet_img_dir = "E:\\Leach\\2017_fires_development_database\\AFRF\\testing\\multi_landsat\\final_tifs"
+    doi, aoi, out_directory, trim, landsat_img_dir, planet_img_dir, bqa_dir = get_inputs()
 
     gdal.UseExceptions()
     # run the Landsat downloader here
@@ -148,14 +155,6 @@ def main():
         for f in [f for f in filenames if f.endswith(".tif")]:
             planet_img_paths.append(f)
             planet_img_dates.append(datetime.date(int(f[0:4]), int(f[5:7]), int(f[8:10])))
-    # determine the dates of the Planet images in relation to the Landsat time series
-    # take first Landsat image as day 0
-    rel_date_planet = []
-    for d in planet_img_dates:
-        rel_date_planet.append((d - landsat_img_dates[0]).days)
-
-    # use the first Planet image in the list as the reference for registration
-    reg_ref = planet_img_paths[0]
 
     # TODO: if requested, trim all the Landsat images in the directory to the extent of the first Planet image
 
@@ -166,8 +165,31 @@ def main():
     cols = int(landsat_arrays[0][0].shape[1])
     bands = len(landsat_arrays[0])
     dates = len(landsat_arrays)
+
+    # build a list of the BQA bands. Will search directory recursively for files ending in "BQA.TIF"
+    # TODO: this doesn't seem to be doing what I expect. bqa_masks is a boolean list
+    bqa_paths = []
+    bqa_masks = []
+    for dirpath, dirnames, filenames in os.walk(bqa_dir, topdown=True):
+        for f in [f for f in filenames if f.endswith("BQA.TIF")]:
+            bqa_paths.append(os.path.join(dirpath, f))
+            bqa_masks.append(landsat_data_masker(os.path.join(dirpath, f)))
+
+    # apply bad data mask to landsat arrays
+    for d in range(0, dates):
+        for b in range(0, bands):
+            landsat_arrays[d][b] = ma.masked_array(landsat_arrays[d][b], mask=bqa_masks[d])
+
     # TODO: better way of getting the initial guesses only once (probably best to prompt user for guesses)
     initial_params = {'amp':3000, 'period':365, 'hor_off':0, 'vert_off':8000}
+
+    # use the first Planet image in the list as the reference for registration
+    reg_ref = planet_img_paths[0]
+    # determine the dates of the Planet images in relation to the Landsat time series
+    # take first Landsat image as day 0
+    rel_date_planet = []
+    for d in planet_img_dates:
+        rel_date_planet.append((d - landsat_img_dates[0]).days)
 
     start = time.time()
     # currently, pixels becomes a list, where each item is an array with a single pixel's values through time (??)
@@ -186,10 +208,14 @@ def main():
         pixels.append(temp_arr)
         temp_arr = []
 
+    import pdb
+    pdb.set_trace()
+
     # for each pixel in the row, calculate the model, then interpolate values for Planet observation
     print "Beginning modeling... "
     pixel_models = []
     temp2 = []
+    np.warnings.filterwarnings('once', '.*converting a masked element to nan.*')
     for b in range(0, bands):
         for i in range(0, rows):
             with poolcontext(processes=8) as pool:
