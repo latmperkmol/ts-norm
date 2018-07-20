@@ -14,6 +14,7 @@ import time
 import arosics
 from iMad import run_MAD
 from radcal import run_radcal
+import warnings
 
 
 def save_VIs(rasterpath, nodataval = -999.):
@@ -64,7 +65,7 @@ def calc_VIs(rasterpath, nodataval = -999.):
     :param nodataval: no-data value in the input images
     :return:
     """
-    print "Calculating vegetation indices... "
+    print("Calculating vegetation indices... ")
     # Set EVI coefficients
     G, C1, C2, L = 2.5, 6.0, 7.5, 1.0
 
@@ -111,7 +112,7 @@ def vegetation_mask(ndvi, threshold=0.75):
     :param threshold: minimum NDVI value required to send a pixel into MAD
     :return: veg_mask: numpy array. 0 -> do not use for MAD. 1 -> usable for MAD.
     """
-    print "Generating vegetation mask... "
+    print("Generating vegetation mask... ")
     rows, cols = ndvi.shape
     empty = np.zeros([rows,cols])
     ones = empty+1
@@ -125,7 +126,7 @@ def vegetation_mask(ndvi, threshold=0.75):
         veg_mask = np.where(ndvi>=threshold, ones, empty)
         iteration += 1
         if iteration > 20:
-            print "Couldn't find enough pixels with sufficient NDVI"
+            print("Couldn't find enough pixels with sufficient NDVI")
             quit()
     return veg_mask
 
@@ -153,18 +154,20 @@ def calc_img_stats(img_tif):
 
 def check_for_clouds(dir=".", tolerance=0.5):
     """
-    Check the Unusable Data Mask (UDM) for the input image to see if it good enough to run through iMad.
+    Check the metadata file for the input image to see if it good enough to run through iMad.
 
     :param dir: (string) directory containing JSON files with image metadata
     :return: usable: (boolean) True for a usable image, False otherwise.
     """
     cloud = []
     for dirpath, dirnames, filenames in os.walk(dir):
-        for filename in [f for f in filenames if f.endswith(".json")]:
+        for filename in [f for f in filenames if f.endswith("metadata.json")]:
             with open(os.path.join(dirpath, filename)) as file:
                 metadata = json.load(file)
                 cloud.append(metadata["properties"]["cloud_cover"])
-
+    if not cloud:
+        warnings.warn("Couldn't find the Planet metadata.json file. Assuming cloud cover is at an acceptable level. ")
+        return True
     cloud_frac = sum(cloud)/len(cloud)
     if cloud_frac <= tolerance and cloud_frac >= 0.0:
         return True
@@ -191,13 +194,13 @@ def register_image(in_img, reference_img, mode="REGISTER", transformation="POLYO
     elif in_img.endswith('.tif'):
         warped_out = in_img[:-4] + "_aligned.tif"
     else:
-        print "Input image must be a GeoTiff. Exiting."
+        print("Input image must be a GeoTiff. Exiting. ")
         return
-    print "Updating georeference data..."
+    print("Updating georeference data...")
     arcpy.RegisterRaster_management(in_img, mode, reference_img, transformation_type=transformation, output_cpt_link_file=links_out)
-    print "Applying warp..."
+    print("Applying warp...")
     arcpy.WarpFromFile_management(in_img, warped_out, links_out, "POLYORDER0")
-    print "Georeference data in " + os.path.split(in_img)[1] + " updated to match " + os.path.split(reference_img)[1]
+    print("Georeference data in " + os.path.split(in_img)[1] + " updated to match " + os.path.split(reference_img)[1])
     return warped_out
 
 
@@ -209,7 +212,7 @@ def register_image2(target_img, reference_img):
     elif target_img.endswith('.tif'):
         warped_out = target_img[:-4] + "_aligned.tif"
     else:
-        print "Input image must be a GeoTiff. Exiting."
+        print("Input image must be a GeoTiff. Exiting.")
         return
     registered_img = arosics.COREG_LOCAL(reference_img, target_img, 300, path_out=warped_out, nodata=(0.0,0.0),
                                          fmt_out="GTiff", projectDir=os.path.split(target_img)[0])
@@ -256,7 +259,7 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
     # downsample the target image if it is higher resolution than the big image
     if allow_downsample==True:
         if (abs(xres_big) != abs(xres_target)) or (abs(yres_big) != abs(yres_target)):
-            print "Downsampling target image..."
+            print("Downsampling target image...")
             # generate name for downsampled version of image
             # TODO: make this robust against capitalization and add a better "else" clause
             if input_target.lower().endswith('tiff'):
@@ -264,8 +267,8 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
             elif input_target.lower().endswith('tif'):
                 downsampled_target = input_target[:-4] + "_downsample.tif"
             else:
-                print "It looks like the file extension was " + input_target[:-4]
-                print "Was expecting .tif or .tiff. Try again."
+                print("It looks like the file extension was " + input_target[:-4])
+                print("Was expecting .tif or .tiff. Try again.")
                 return
             # perform downsampling
             call('gdalwarp -tr ' + str(abs(xres_big)) + ' ' + str(abs(yres_big)) + ' -r average ' + input_target + ' '
@@ -285,7 +288,7 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
         downsampled_target = input_target
         conductedDownsample = False
 
-    print "Cropping..."
+    print("Cropping...")
     call('gdal_translate -projwin ' + ' '.join([str(x) for x in [minx, maxy, maxx, miny]]) + ' -a_nodata 0.0' + ' -of GTiff ' + input_big + ' ' + outfile, shell=True)
     return (conductedDownsample, downsampled_target, outfile, input_target)
 
@@ -315,7 +318,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         rows2 = img_nodata_target.RasterYSize
         bands = img_nodata_target.RasterCount
         if (cols != cols2) or (rows != rows2):
-            print "size mismatch. use images with same dimensions."
+            print("size mismatch. use images with same dimensions.")
             return
 
         target_arr = np.zeros([rows, cols, bands])     # intializing. will become the output image
@@ -327,15 +330,15 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         if dst_nodata != 0.0:
             dst_nodata_arr.fill(dst_nodata)
 
-        print "Building no-data array..."
+        print("Building no-data array...")
         noDataMask = (img_nodata_source == src_nodata)  # Pixels with data marked as 0.0. Pixels with no data marked as 1.0.
 
-        print "Applying no-data array..."
+        print("Applying no-data array...")
         for band in range(bands):
             target_arr[:, :, band] = np.array(img_nodata_target.GetRasterBand(band + 1).ReadAsArray())
             target_arr[:, :, band] = np.where(noDataMask[:, :], dst_nodata_arr[:, :], target_arr[:, :, band])
 
-        print "Writing and saving..."
+        print("Writing and saving...")
         dir_target = os.path.split(cropped_img)[0]
         outfile = dir_target + '\\' + outfile
         target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, gdal.GDT_Int32)
@@ -346,7 +349,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         target_DS.FlushCache()
         target_DS = None
         img_nodata_target = None
-        print "Done setting no-data!"
+        print("Done setting no-data!")
         return (img_nodata_source, outfile)
 
     else:
@@ -364,7 +367,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, gdal.GDT_Int32)
 
         if (cols != cols2) or (rows != rows2):
-            print "size mismatch. use images with same dimensions."
+            print("size mismatch. use images with same dimensions.")
             return
 
         planet_arr = np.zeros([rows, cols, bands])
@@ -377,17 +380,17 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         if dst_nodata != 0.0:
             dst_nodata_arr.fill(dst_nodata)
 
-        print "Building no-data array..."
+        print("Building no-data array...")
         for band in range(bands):
             planet_arr[:,:,band] = np.array(planet.GetRasterBand(band+1).ReadAsArray())
             noDataMask[:,:,band] = planet_arr[:,:,0] == src_nodata     # Pixels with data marked as 0.0. Pixels with no data marked as 1.0. Could flip this by using: planet_arr[:,:,0] != 0.0
 
-        print "Applying no-data array..."
+        print("Applying no-data array...")
         for band in range(bands):
             target_arr[:,:,band] = np.array(target.GetRasterBand(band+1).ReadAsArray())
             target_arr[:,:,band] = np.where(noDataMask[:,:,band], dst_nodata_arr[:,:], target_arr[:,:,band])
 
-        print "Writing and saving..."
+        print("Writing and saving...")
         for band in range(bands):
             target_DS.GetRasterBand(band+1).WriteArray(target_arr[:,:,band])
         target_DS.SetGeoTransform(planet.GetGeoTransform())
@@ -397,7 +400,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         target_DS = None
         target = None
         planet = None
-        print "Done setting no-data!"
+        print("Done setting no-data!")
         return (planet_img, outfile)
 
 
@@ -543,7 +546,7 @@ def diff_images(img1_path, img2_path, outfile=False):
     bands = min([bands1, bands2])
     # Step 2: make sure the images are the same dimensions. If not, upsample to the finer resolution.
     if (rows1 != rows2) or (cols1 != cols2):
-        print "Images have different dimensions. Attempting to fix that... "
+        print("Images have different dimensions. Attempting to fix that... ")
         if (rows1 > rows2) or (cols1 > cols2):
             # first arg is the one that gets downsampled
             # returns filepath
@@ -592,15 +595,15 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     image2_dir = os.path.split(image2)[0]
     below_cloud_thresh = check_for_clouds(image2_dir, tolerance=0.5)
     if below_cloud_thresh == False:
-        print "Image is above cloud threshold. Either use a different image or increase threshold."
+        print("Image is above cloud threshold. Either use a different image or increase threshold.")
         cloudOverride = raw_input("Override cloud threshold? y/n: ")
         if cloudOverride == "y":
-            print "Cloud threshold overridden. Proceeding with processing. "
+            print("Cloud threshold overridden. Proceeding with processing. ")
         elif cloudOverride == "n":
-            print "Exiting. "
+            print("Exiting. ")
             return
         else:
-            print "Must choose y or n. Try again."
+            print("Must choose y or n. Try again.")
             return
     # Step 0.5: check to make sure all input images are in the same projection
     rad_ref_DS = gdal.Open(image1)
@@ -609,14 +612,24 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     rad_ref_prj = rad_ref_DS.GetProjection()
     reg_ref_prj = reg_ref_DS.GetProjection()
     target_prj = target_DS.GetProjection()
-    rad_ref_srs = osr.SpatialReference(wkt=rad_ref_prj)
-    reg_ref_srs = osr.SpatialReference(wkt=reg_ref_prj)
-    target_srs = osr.SpatialReference(wkt=target_prj)
+    rad_ref_srs = osr.SpatialReference(wkt=rad_ref_prj).GetAttrValue('projcs')
+    reg_ref_srs = osr.SpatialReference(wkt=reg_ref_prj).GetAttrValue('projcs')
+    target_srs = osr.SpatialReference(wkt=target_prj).GetAttrValue('projcs')
     if (rad_ref_srs == reg_ref_srs == target_srs):
-        print "All projections are the same. Good. "
+        print("All projections are the same. Good. ")
     else:
-        print "Oh no! The projections are different! "
-        print "Attempting to proceed anyway. God help us all. "
+        warnings.warn("Oh no! The projections are different! Attemping to fix that. ")
+        print("Projection of the radiometric reference: " + str(rad_ref_srs))
+        print("Projection of the registration reference: " + str(reg_ref_srs))
+        print("Projection of the target image: " + str(target_srs))
+        if rad_ref_srs != reg_ref_srs:
+            reproj_reg_ref = os.path.join(os.path.split(image_reg_ref)[0], "reg_ref_reprojected.tif")
+            call('gdalwarp ' + image_reg_ref + ' ' + reproj_reg_ref + 't_srs EPSG:' + rad_ref_srs)
+            image_reg_ref = reproj_reg_ref
+        if rad_ref_srs != target_srs:
+            reproj_target = os.path.join(os.path.split(image2)[0], image2[:-4]+"reproj.tif")
+            call('gdalwarp ' + image2 + ' ' + reproj_target + 't_srs EPSG:' + rad_ref_srs)
+            image2 = reproj_target
 
     # Step 1: grab a Landsat snip that will be used to align the Planet image.
     #trim_out = trim_to_image(image1, image2, False)
@@ -655,42 +668,29 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     planet_img_vegmask, landsat_img_vegmask = no_data_out_vegmask  # note that planet_img and landsat_img include paths
 
     end = time.time()
-    print "==============================="
-    print "Time elapsed: " + str(int(end-start)) + " seconds"
-    print "==============================="
-    print "\n"
-    print "Beginning MAD..."
+    print("===============================")
+    print("Time elapsed: " + str(int(end-start)) + " seconds")
+    print("===============================")
+    print()
+    print("Beginning MAD...")
     outfile_MAD = os.path.split(planet_img_novegmask)[1][:-4] + "_MAD.tif"
     outfile_RAD = os.path.split(planet_img_novegmask)[1][:-4] + "_RAD.tif"
     outfile_final = os.path.split(image2)[1][:-4] + "_FINAL.tif"
     run_MAD(planet_img_vegmask, landsat_img_vegmask, outfile_MAD)
     # image2_aligned is the full resolution Planet scene
-    print "Beginning radcal..."
+    print("Beginning radcal...")
     normalized_fsoutfile = run_radcal(planet_img_novegmask, landsat_img_novegmask, outfile_RAD, outfile_MAD,
                                       image2_aligned, view_plots=view_radcal_fits, add_nodata=True)
     # Step 6: re-apply no-data values to the radiometrically corrected full-resolution planet image
     # necessary since radcal applies the correction to the no-data areas
     set_no_data(image2_aligned, normalized_fsoutfile, outfile_final, dst_nodata=-999.)
 
-    # Step 7: check if there are negative values in any bands. If so, generate a notification.
-    # TODO: implement this in a way that is useful if there is a negative nodata value
-    #img_stats = calc_img_stats(outfile_final)
-    #img_mins = []
-    #hasNegativeValues = False
-    #for i in xrange(len(img_stats)):
-    #    img_mins.append(img_stats[i]['min'])
-    #if min(img_mins) <= 0.0:
-    #    hasNegativeValues = True
-    #    print "Some bands have negative values. Might want to look into that. "
-    #else:
-    #    print "No bands have negative values. "
-
     end = time.time()
-    print "==============================="
-    print "All done!"
-    print "Final image at: "
-    print outfile_final
-    print "Total time elapsed: " + str(int(end-start)) + " seconds"
+    print("===============================")
+    print("All done!")
+    print("Final image at: ")
+    print(outfile_final)
+    print("Total time elapsed: " + str(int(end-start)) + " seconds")
     outpath_final = os.path.join(os.path.split(image1)[0], outfile_final)
 
     return outpath_final
@@ -705,7 +705,7 @@ if __name__ == '__main__':
     elif allowDownsample == "n":
         allowDownsample = False
     else:
-        print "Must choose y or n. Try again."
+        print("Must choose y or n. Try again.")
         quit()
     allowRegistration = raw_input("Allow target image to be re-registered if needed? y/n: ")
     if allowRegistration == "y":
@@ -713,7 +713,7 @@ if __name__ == '__main__':
     elif allowRegistration == "n":
         allowRegistration = False
     else:
-        print "Must choose y or n. Try again."
+        print("Must choose y or n. Try again.")
         quit()
     view_radcal_fits = raw_input("View radiometric calibration fit? y/n: ")
     if view_radcal_fits == "y":
@@ -721,5 +721,6 @@ if __name__ == '__main__':
     elif view_radcal_fits == "n":
         view_radcal_fits = False
     else:
-        print "Must choose y or n. Try again."
+        print("Must choose y or n. Try again.")
+        quit()
     main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits)

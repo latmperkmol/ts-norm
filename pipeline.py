@@ -82,16 +82,28 @@ def read_rasters_as_arrays(rasterlist):
     return arrays
 
 
-def fit_model_to_pixel_ts(pixel, model, dates, initial_params=0., interp_dates=[]):
+def fit_model_to_pixel_ts(pixel, model, dates, initial_params=0., interp_dates=[], min_valid_points=5.):
     """
     Generate a set of parameters using a non-linear least-squares minimization method
     :param model: (function) the model chosen to fit the data
-    :param pixel: (np array) a vector with the value of a pixel through time
+    :param pixel: (np masked array) a vector with the value of a pixel through time
     :param dates: (list or np array) a vector with the dates of each raster
     :param initial_params: (dictionary) keys are names of params, values are values
     :param interp_dates: (list or np array) a vector with the dates to evaluate each model (i.e. dates of Planet images)
-    :return: array containing the model fit
+    :return: array containing the model fit evaluated at the dates with Planet acquisitions
     """
+    # in case pixel gets passed in a a list instead of a masked array:
+    pixel = ma.asarray(pixel)
+    # make sure there are enough usable values to actually fit a model
+    if len(pixel[~pixel.mask]) <= min_valid_points:
+        #print "Only found " + str(len(pixel[~pixel.mask])) + " usable pixels for an input pixel-location."
+        # do a bad thing: just call the pixel constant through time with the average value of the available pixels
+        avg_value = np.average(pixel)
+        if interp_dates == []:
+            interp_dates = np.linspace(dates[0], dates[-1], dates[-1] + 1)
+        constant_pixel_val = np.full(len(interp_dates), avg_value)
+        return constant_pixel_val
+
     fit_model = Model(model, nan_policy='propagate')       # should this be "omit" instead??
     param_dict = dict()
     if initial_params != 0.:
@@ -104,7 +116,6 @@ def fit_model_to_pixel_ts(pixel, model, dates, initial_params=0., interp_dates=[
             param_dict[p] = float(raw_input("Initial value for " + p + " : "))
         params = fit_model.make_params(**param_dict)
 
-    # TODO: add error handling here in case pixel is too masked (not enough data points?)
     result = fit_model.fit(pixel, params, x=dates, nan_policy="omit")
     # make a vector with all the dates in the range. model will interpolate these values
     if interp_dates == []:
@@ -149,7 +160,7 @@ def main():
 
     planet_img_paths = []
     planet_img_dates = []
-    exclude = set(["EVI", "NDVI", "final_tifs"])
+    exclude = {"EVI", "NDVI", "final_tifs"}
     for dirpath, dirnames, filenames in os.walk(planet_img_dir, topdown=True):
         dirnames[:] = [d for d in dirnames if d not in exclude]
         for f in [f for f in filenames if f.endswith(".tif")]:
@@ -167,7 +178,6 @@ def main():
     dates = len(landsat_arrays)
 
     # build a list of the BQA bands. Will search directory recursively for files ending in "BQA.TIF"
-    # TODO: this doesn't seem to be doing what I expect. bqa_masks is a boolean list
     bqa_paths = []
     bqa_masks = []
     for dirpath, dirnames, filenames in os.walk(bqa_dir, topdown=True):
@@ -197,6 +207,7 @@ def main():
     temp_row = []
     temp_arr = []
 
+    # TODO: fix this up? really janky and could probably be improved and switched to np arrays
     for b in range(0, bands):
         for j in range(0, rows):
             for i in range(0, cols):
@@ -261,6 +272,7 @@ def main():
     import pdb; pdb.set_trace()
     # double check that there are the same number of proxy images and Planet images
     # if yes, go ahead and do registration and radiometric calibration
+    # TODO: if there is a Landsat image available within X number of days, calibrate to that instead of the proxy??
     calibrated_img_paths = []
     if len(planet_img_paths) == len(proxy_images_paths):
         for i in range(0, len(planet_img_paths)):
