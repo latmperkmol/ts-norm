@@ -45,11 +45,6 @@ def radiometric_calibration(target_img, reg_ref_img, rad_ref_img):
     return calibrated_img_path
 
 
-def landsat_downloader(date, area, directory):
-
-    return
-
-
 def harmonic_model(x, amp, period, hor_off, vert_off):
     return amp*np.sin(x*2*np.pi/period - hor_off) + vert_off
 
@@ -259,26 +254,6 @@ def main():
         proxy_images_paths.append(fpath)
         cu.array_to_img(proxy_img, fpath, landsat_img_paths[0])     # use information from first landsat image in stack
         i += 1
-
-    # have same number of proxy_images (Landsat) and Planet images. Now need to calibrate each Planet to each Landsat
-    # Testing issue: the Landsat reference proxy images are way smaller than the Planet images.
-        # For testing, can address this by cropping the Planet images down to size?
-
-    # double check that there are the same number of proxy images and Planet images
-    # if yes, go ahead and do registration and radiometric calibration
-    # TODO: if there is a Landsat image available within X number of days, calibrate to that instead of the proxy??
-    # TODO: this section does not work yet. Issue with file paths. Needs work.
-    calibrated_img_paths = []
-    if len(planet_img_paths) == len(proxy_images_paths):
-        for i in range(0, len(planet_img_paths)):
-            calibrated_img_paths.append(cu.main(proxy_images_paths[i], reg_ref, planet_img_paths[i],
-                                                allowDownsample=True, allowRegistration=True, view_radcal_fits=False))
-    else:
-        print "We somehow ended up with a different number of Planet images and proxy images. Best see to that. "
-        # TODO: add better error handling here
-        return
-
-    # next step: zonal stats for the shapefile
 
     return
 
