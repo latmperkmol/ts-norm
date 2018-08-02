@@ -217,8 +217,10 @@ def register_image2(target_img, reference_img):
     registered_img = arosics.COREG_LOCAL(reference_img, target_img, 300, path_out=warped_out, nodata=(0.0,0.0),
                                          fmt_out="GTiff", projectDir=os.path.split(target_img)[0])
     tie_points = registered_img.CoRegPoints_table
-    tie_points.to_csv(os.path.join(direc, "coreg_points.csv"), sep=",", index=False)
-    registered_img.view_CoRegPoints(savefigPath=os.path.join(direc, "coreg_visual.png"))
+    coreg_csv_name = os.path.split(target_img)[1] + "coreg_points.csv"
+    coreg_visual_name = os.path.split(target_img)[1] + "coreg_visual.png"
+    tie_points.to_csv(os.path.join(direc, coreg_csv_name), sep=",", index=False)
+    registered_img.view_CoRegPoints(savefigPath=os.path.join(direc, coreg_visual_name))
     registered_img.correct_shifts()
     return warped_out
 
@@ -612,23 +614,24 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     rad_ref_prj = rad_ref_DS.GetProjection()
     reg_ref_prj = reg_ref_DS.GetProjection()
     target_prj = target_DS.GetProjection()
-    rad_ref_srs = osr.SpatialReference(wkt=rad_ref_prj).GetAttrValue('projcs')
-    reg_ref_srs = osr.SpatialReference(wkt=reg_ref_prj).GetAttrValue('projcs')
-    target_srs = osr.SpatialReference(wkt=target_prj).GetAttrValue('projcs')
+    rad_ref_srs = osr.SpatialReference(wkt=rad_ref_prj).GetAttrValue('authority', 1)
+    reg_ref_srs = osr.SpatialReference(wkt=reg_ref_prj).GetAttrValue('authority', 1)
+    target_srs = osr.SpatialReference(wkt=target_prj).GetAttrValue('authority', 1)
     if (rad_ref_srs == reg_ref_srs == target_srs):
         print("All projections are the same. Good. ")
     else:
         warnings.warn("Oh no! The projections are different! Attemping to fix that. ")
-        print("Projection of the radiometric reference: " + str(rad_ref_srs))
-        print("Projection of the registration reference: " + str(reg_ref_srs))
-        print("Projection of the target image: " + str(target_srs))
+        print("Projection of the radiometric reference: " + str('EPSG:'+rad_ref_srs))
+        print("Projection of the registration reference: " + str('EPSG:'+reg_ref_srs))
+        print("Projection of the target image: " + str('EPSG:'+target_srs))
         if rad_ref_srs != reg_ref_srs:
             reproj_reg_ref = os.path.join(os.path.split(image_reg_ref)[0], "reg_ref_reprojected.tif")
-            call('gdalwarp ' + image_reg_ref + ' ' + reproj_reg_ref + 't_srs EPSG:' + rad_ref_srs)
+            call('gdalwarp -t_srs EPSG:' + rad_ref_srs + ' ' + image_reg_ref + ' ' + reproj_reg_ref)
             image_reg_ref = reproj_reg_ref
         if rad_ref_srs != target_srs:
-            reproj_target = os.path.join(os.path.split(image2)[0], image2[:-4]+"reproj.tif")
-            call('gdalwarp ' + image2 + ' ' + reproj_target + 't_srs EPSG:' + rad_ref_srs)
+            reproj_target = os.path.join(os.path.split(image2)[0], image2[:-4]+"_reproj.tif")
+            import pdb; pdb.set_trace()
+            call('gdalwarp -overwrite -s_srs EPSG:' + target_srs + ' -t_srs EPSG:' + rad_ref_srs + ' ' + image2 + ' ' + reproj_target)
             image2 = reproj_target
 
     # Step 1: grab a Landsat snip that will be used to align the Planet image.

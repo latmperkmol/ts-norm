@@ -15,16 +15,10 @@ Given AOI(s) and a target date, this will:
 
 import numpy as np
 import numpy.ma as ma
-import matplotlib.pyplot as plt
 import gdal
-import os, shutil
+import os
 import custom_utils as cu
-import zonal_stats_script
-import despike
-import segment_fitter
 import datetime
-import pandas as pd
-import geopandas as gpd
 from lmfit import Model
 from functools import partial
 from contextlib import contextmanager
@@ -41,7 +35,7 @@ def get_inputs():
     ref_dir = raw_input("Directory of (radiometric) reference scenes: ")
     planet_dir = raw_input("Directory of Planet images: ")
     bqa_dir = raw_input("Directory of Landsat quality masks: ")   # will assume their names have not been changed
-    trim = bool(raw_input("Do the Landsat images in your directory need to be cropped? 'True' or 'False': "))
+    trim = raw_input("Do the Landsat images in your directory need to be cropped? y/n: ")
     return date_of_interest, aoi, direc, trim, ref_dir, planet_dir, bqa_dir
 
 
@@ -98,11 +92,14 @@ def fit_model_to_pixel_ts(pixel, model, dates, initial_params=0., interp_dates=[
     if len(pixel[~pixel.mask]) <= min_valid_points:
         #print "Only found " + str(len(pixel[~pixel.mask])) + " usable pixels for an input pixel-location."
         # do a bad thing: just call the pixel constant through time with the average value of the available pixels
-        avg_value = np.average(pixel)
-        if interp_dates == []:
-            interp_dates = np.linspace(dates[0], dates[-1], dates[-1] + 1)
-        constant_pixel_val = np.full(len(interp_dates), avg_value)
-        return constant_pixel_val
+        if len(pixel[~pixel.mask]) == 0:
+            return 0
+        else:
+            avg_value = np.average(pixel)
+            if interp_dates == []:
+                interp_dates = np.linspace(dates[0], dates[-1], dates[-1] + 1)
+            constant_pixel_val = np.full(len(interp_dates), avg_value)
+            return constant_pixel_val
 
     fit_model = Model(model, nan_policy='propagate')       # should this be "omit" instead??
     param_dict = dict()
@@ -164,7 +161,7 @@ def main():
     for dirpath, dirnames, filenames in os.walk(planet_img_dir, topdown=True):
         dirnames[:] = [d for d in dirnames if d not in exclude]
         for f in [f for f in filenames if f.endswith(".tif")]:
-            planet_img_paths.append(f)
+            planet_img_paths.append(os.path.join(planet_img_dir, f))
             planet_img_dates.append(datetime.date(int(f[0:4]), int(f[5:7]), int(f[8:10])))
 
     # TODO: if requested, trim all the Landsat images in the directory to the extent of the first Planet image
@@ -219,9 +216,6 @@ def main():
         pixels.append(temp_arr)
         temp_arr = []
 
-    import pdb
-    pdb.set_trace()
-
     # for each pixel in the row, calculate the model, then interpolate values for Planet observation
     print "Beginning modeling... "
     pixel_models = []
@@ -260,6 +254,7 @@ def main():
     i = 0
     for proxy_img in proxy_images:
         fname = "landsat_proxy_d" + str(rel_date_planet[i]) + ".tif"
+        print("Generating proxy image " + str(i+1))
         fpath = os.path.join(out_directory, fname)
         proxy_images_paths.append(fpath)
         cu.array_to_img(proxy_img, fpath, landsat_img_paths[0])     # use information from first landsat image in stack
@@ -269,14 +264,14 @@ def main():
     # Testing issue: the Landsat reference proxy images are way smaller than the Planet images.
         # For testing, can address this by cropping the Planet images down to size?
 
-    import pdb; pdb.set_trace()
     # double check that there are the same number of proxy images and Planet images
     # if yes, go ahead and do registration and radiometric calibration
     # TODO: if there is a Landsat image available within X number of days, calibrate to that instead of the proxy??
+    # TODO: this section does not work yet. Issue with file paths. Needs work.
     calibrated_img_paths = []
     if len(planet_img_paths) == len(proxy_images_paths):
         for i in range(0, len(planet_img_paths)):
-            calibrated_img_paths.append(cu.main(proxy_images_paths[i], planet_img_paths[0], planet_img_paths[i],
+            calibrated_img_paths.append(cu.main(proxy_images_paths[i], reg_ref, planet_img_paths[i],
                                                 allowDownsample=True, allowRegistration=True, view_radcal_fits=False))
     else:
         print "We somehow ended up with a different number of Planet images and proxy images. Best see to that. "
