@@ -3,6 +3,9 @@
 # >> python custom_utils.py
 # Will prompt for names and file locations of images.
 
+import warnings
+warnings.filterwarnings("ignore", message="numpy.dtype size changed")
+warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 import json
 import rasterio
 import numpy as np
@@ -14,10 +17,10 @@ import time
 import arosics
 from iMad import run_MAD
 from radcal import run_radcal
-import warnings
 
 
-def save_VIs(rasterpath, nodataval = -999.):
+
+def save_VIs(rasterpath, nodataval = 0.0):
     """
     Generates two new GeoTiffs: the NDVI and EVI for the input raster.
 
@@ -57,7 +60,7 @@ def save_VIs(rasterpath, nodataval = -999.):
     return
 
 
-def calc_VIs(rasterpath, nodataval = -999.):
+def calc_VIs(rasterpath, nodataval = 0.0):
     """
     Generates numpy arrays of the NDVI and EVI
 
@@ -295,7 +298,7 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
     return (conductedDownsample, downsampled_target, outfile, input_target)
 
 
-def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_nodata=-999.):
+def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_nodata=0.0):
     """
     Takes in two images- one with no-data values around the perimeter, one without. Applies matching no-data values to the second image and saves as new output.
 
@@ -654,16 +657,16 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
         downsampled_img = original_planet_img
 
     # Step 4: mask out any pixels with an NDVI below a given threshold
-    VI_calc_out = calc_VIs(downsampled_img, nodataval=-999.)
+    VI_calc_out = calc_VIs(downsampled_img, nodataval=0.0)
     ndvi = VI_calc_out[0]
     veg_mask = vegetation_mask(ndvi, threshold=-0.50)
     # throw Planet image and vegetation mask into set_no_data(). Second output will be Planet scene with mask applied.
-    planet_downsamp_vegmasked = set_no_data(veg_mask, downsampled_img, outfile="planet_with_veg_mask.tif", src_nodata=0.0, dst_nodata=-999.)[1]
+    planet_downsamp_vegmasked = set_no_data(veg_mask, downsampled_img, outfile="planet_with_veg_mask.tif", src_nodata=0.0, dst_nodata=0.0)[1]
 
     # Step 5: add no data values into Landsat image so that it will play nice with iMad.py and radcal.py
     landsat_nodata = os.path.split(cropped_img)[1][:-4] +"_nodata.tif"  # IMPORTANT that this does not have file location.
-    no_data_out_novegmask = set_no_data(downsampled_img, cropped_img, landsat_nodata, dst_nodata=-999.)  # need version that hasn't been masked too.
-    no_data_out_vegmask = set_no_data(planet_downsamp_vegmasked, cropped_img, landsat_nodata, dst_nodata=-999.)
+    no_data_out_novegmask = set_no_data(downsampled_img, cropped_img, landsat_nodata, dst_nodata=0.0)  # need version that hasn't been masked too.
+    no_data_out_vegmask = set_no_data(planet_downsamp_vegmasked, cropped_img, landsat_nodata, dst_nodata=0.0)
 
     # at this point, we have a Planet image at Landsat resolution and a Landsat image with Planet no-data values.
     # everything we need for MAD + radcal to run
@@ -687,7 +690,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
                                       image2_aligned, view_plots=view_radcal_fits, add_nodata=True)
     # Step 6: re-apply no-data values to the radiometrically corrected full-resolution planet image
     # necessary since radcal applies the correction to the no-data areas
-    set_no_data(image2_aligned, normalized_fsoutfile, outfile_final, dst_nodata=-999.)
+    set_no_data(image2_aligned, normalized_fsoutfile, outfile_final, dst_nodata=0.0)
 
     end = time.time()
     print("===============================")
@@ -700,6 +703,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     return outpath_final
 
 if __name__ == '__main__':
+
     image1 = raw_input("Location of image with desired radiometry (probably Landsat): ")
     image_reg_ref = raw_input("Location of image with desired georeferencing: ")
     image2 = raw_input("Location of image to be radiometrically normalized (probably Planet): ")

@@ -21,7 +21,7 @@ import sys, os, time
 import numpy as np 
 from scipy import stats
 from osgeo import gdal
-from osgeo.gdalconst import GA_ReadOnly, GDT_Float32, GDT_Int32
+from osgeo.gdalconst import GA_ReadOnly, GDT_Float32, GDT_Int32, GDT_UInt16
 import matplotlib.pyplot as plt
 import json
  
@@ -128,7 +128,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     print 'no-change pixels (train): '+str(len(trn))
     print 'no-change pixels (test): '+str(len(tst))           
     driver = gdal.GetDriverByName(fmt)    
-    outDataset = driver.Create(outfile,cols,rows,bands,GDT_Int32)
+    outDataset = driver.Create(outfile,cols,rows,bands,GDT_UInt16)
     projection = inDataset1.GetProjection()
     geotransform = inDataset1.GetGeoTransform()
     if geotransform is not None:
@@ -196,7 +196,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         cols = fsDataset.RasterXSize
         rows = fsDataset.RasterYSize    
         driver = fsDataset.GetDriver()
-        outDataset = driver.Create(fsoutfile,cols,rows,bands,GDT_Int32)
+        outDataset = driver.Create(fsoutfile,cols,rows,bands,GDT_UInt16)
         projection = fsDataset.GetProjection()
         geotransform = fsDataset.GetGeoTransform()
         if geotransform is not None:
