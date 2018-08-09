@@ -343,6 +343,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         print("Writing and saving...")
         dir_target = os.path.split(cropped_img)[0]
         outfile = dir_target + '\\' + outfile
+        # TODO: change from Int32 to Int16? Would need to change in iMad and radcal
         target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, gdal.GDT_Int32)
         for band in range(bands):
             target_DS.GetRasterBand(band+1).WriteArray(target_arr[:,:,band])
