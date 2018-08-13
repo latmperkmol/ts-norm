@@ -28,21 +28,20 @@ import warnings
 
 
 def get_inputs():
-    d = raw_input("Date of interest (YYYY-MM-DD): ")
-    date_of_interest = datetime.date(int(d[0:4]), int(d[5:7]), int(d[8:10]))
-    aoi = raw_input("Filepath of area of interest (.shp): ")
     direc = raw_input("Directory for outputs: ")
     ref_dir = raw_input("Directory of (radiometric) reference scenes: ")
     planet_dir = raw_input("Directory of Planet images: ")
     bqa_dir = raw_input("Directory of Landsat quality masks: ")   # will assume their names have not been changed
     trim = raw_input("Do the Landsat images in your directory need to be cropped? y/n: ")
-    return date_of_interest, aoi, direc, trim, ref_dir, planet_dir, bqa_dir
+    if trim.lower() == 'y':
+        trim = True
+    elif trim.lower() == 'n':
+        trim = False
+    else:
+        print("Need either y/n. Try again. ")
+        return
 
-
-def radiometric_calibration(target_img, reg_ref_img, rad_ref_img):
-    calibrated_img_path = cu.main(target_img, reg_ref_img, rad_ref_img, allowDownsample=True,
-                                            allowRegistration=True, view_radcal_fits=False)
-    return calibrated_img_path
+    return direc, trim, ref_dir, planet_dir, bqa_dir
 
 
 def harmonic_model(x, amp, period, hor_off, vert_off):
@@ -244,7 +243,6 @@ def main():
         proxy_images.append(temp_arr)
 
     # Save the Landsat images to disk
-    # TODO: in order for this to work with the cu.array_to_img method, will need to build 3D arrays
     proxy_images_paths = []
     i = 0
     for proxy_img in proxy_images:
@@ -255,7 +253,7 @@ def main():
         cu.array_to_img(proxy_img, fpath, landsat_img_paths[0])     # use information from first landsat image in stack
         i += 1
 
-    return
+    return proxy_images_paths
 
 
 if __name__ == '__main__':
