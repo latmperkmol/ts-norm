@@ -20,8 +20,7 @@ from iMad import run_MAD
 from radcal import run_radcal
 
 
-
-def save_VIs(rasterpath, nodataval = 0.0):
+def save_VIs(rasterpath, default_out_dir="y", nodataval = 0.0, save_ndvi=True, save_evi=False):
     """
     Generates two new GeoTiffs: the NDVI and EVI for the input raster.
 
@@ -33,31 +32,28 @@ def save_VIs(rasterpath, nodataval = 0.0):
 
     # grab the directory and original file name, then build new filenames
     dir_src, filename_src = os.path.split(rasterpath)[0], os.path.split(rasterpath)[1]
+    if default_out_dir != "y":
+        dir_src = default_out_dir
     filename_ndvi_src = dir_src + '\\' + filename_src[:-4] + '-NDVI.tif'
     filename_evi_src = dir_src + '\\' + filename_src[:-4] + '-EVI.tif'
 
-    ndvi_dst = gdal.GetDriverByName('GTIff').Create(filename_ndvi_src, cols, rows, 1, gdal.GDT_Float32)
-    evi_dst = gdal.GetDriverByName('GTiff').Create(filename_evi_src, cols, rows, 1, gdal.GDT_Float32)
-    # Write NDVI and EVI to files
-    ndvi_dst.GetRasterBand(1).WriteArray(ndvi[:,:])
-    evi_dst.GetRasterBand(1).WriteArray(evi[:, :])
-
-    ndvi_dst.SetGeoTransform(img_src.GetGeoTransform())
-    evi_dst.SetGeoTransform(img_src.GetGeoTransform())
-    ndvi_dst.SetProjection(img_src.GetProjection())
-    evi_dst.SetProjection(img_src.GetProjection())
-
-    #ndvi_dst.SetNoDataValue(nodataval)
-    #evi_dst.SetNoDataValue(nodataval)
-
+    if save_ndvi:
+        ndvi_dst = gdal.GetDriverByName('GTIff').Create(filename_ndvi_src, cols, rows, 1, gdal.GDT_Float32)
+        ndvi_dst.GetRasterBand(1).WriteArray(ndvi[:, :])
+        ndvi_dst.SetGeoTransform(img_src.GetGeoTransform())
+        ndvi_dst.SetProjection(img_src.GetProjection())
+        ndvi_dst.FlushCache()
+        ndvi_dst = None
+    if save_evi:
+        evi_dst = gdal.GetDriverByName('GTiff').Create(filename_evi_src, cols, rows, 1, gdal.GDT_Float32)
+        evi_dst.GetRasterBand(1).WriteArray(evi[:, :])
+        evi_dst.SetGeoTransform(img_src.GetGeoTransform())
+        evi_dst.SetProjection(img_src.GetProjection())
+        evi_dst.FlushCache()
+        evi_dst = None
     # Close up shop
-    ndvi_dst.FlushCache()
-    evi_dst.FlushCache()
-    ndvi_dst = None
-    evi_dst = None
     img_src = None
     src = None
-
     return
 
 
@@ -113,9 +109,9 @@ def vegetation_mask(ndvi, threshold=0.75):
 
     # where ndvi >= threshold, veg_mask = True. Elsewhere, veg_mask = 0.
     veg_mask = np.where(ndvi>=threshold, ones, empty)
-    # require that at least 1000 pixels are usable
+    # require that at least 10000 pixels are usable
     iteration = 0
-    while np.sum(veg_mask) < 1000:
+    while np.sum(veg_mask) < 10000:
         threshold -= 0.10
         print("Couldn't find enough usable pixels for veg mask. Reducing NDVI threshold to %3.2f " % threshold)
         veg_mask = np.where(ndvi>=threshold, ones, empty)
@@ -251,11 +247,9 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
     # name the output file for the cropped big image. take path from input_target
     dir_target = os.path.split(input_target)[0]
     if input_big.endswith('.tiff'):
-        outfile = os.path.join(dir_target, os.path.split(input_big)[1][:-5] + "trimmed.tif")
-        # outfile = dir_target + '\\\\' + os.path.split(input_big)[1][:-5] + "_trimmed.tif"
+        outfile = os.path.join(dir_target, os.path.split(input_big)[1][:-5] + "_trimmed.tif")
     else:
         outfile = os.path.join(dir_target, os.path.split(input_big)[1][:-4] + "_trimmed.tif")
-        # outfile = dir_target + '\\\\' + os.path.split(input_big)[1][:-4] + "_trimmed.tif"
 
     # downsample the target image if it is higher resolution than the big image
     if allow_downsample:
@@ -293,6 +287,17 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
     call('gdal_translate -projwin ' + ' '.join([str(x) for x in [minx, maxy, maxx, miny]]) + ' -a_nodata 0.0' +
          ' -of GTiff ' + input_big + ' ' + outfile, shell=True)
     return conductedDownsample, downsampled_target, outfile, input_target
+
+
+def perform_downsample(src_image, target_res, outfile="downsample.tif"):
+    # open source image, grab resolution
+    src_DS = gdal.Open(src_image, GA_ReadOnly)
+    geotransform = src_DS.GetGeoTransform()
+    src_xres = geotransform[1]
+    src_yres = geotransform[5]
+    call('gdalwarp -tr ' + str(abs(target_res)) + ' ' + str(abs(target_res)) + ' -r average ' + src_image + ' '
+         + outfile, shell=True)
+    return outfile
 
 
 def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_nodata=0.0, save_mask=False):
@@ -498,11 +503,19 @@ def histogram(img_path, bins_count=range(0,1000)):
 
 
 def img_to_array(img_path):
+    """
+    Returns a list of arrays for a multiband image. Returns a signle numpy array for a single band image.
+    :param img_path:
+    :return:
+    """
     img_src = gdal.Open(img_path)
     bands = img_src.RasterCount
-    bands_array = []
-    for band in range(bands):
-        bands_array.append(np.array(img_src.GetRasterBand(band+1).ReadAsArray()).astype(np.float))
+    if bands > 1:
+        bands_array = []
+        for band in range(bands):
+            bands_array.append(np.array(img_src.GetRasterBand(band+1).ReadAsArray()).astype(np.float))
+    else:
+        bands_array = np.array(img_src.GetRasterBand(1).ReadAsArray()).astype(np.float)
     img_src = None
     return bands_array
 
@@ -654,7 +667,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
             image2 = reproj_target
 
     # Step 1: grab a Landsat snip that will be used to align the Planet image.
-    trim_out = trim_to_image(image_reg_ref, image2, False)
+    trim_out = trim_to_image(image_reg_ref, image2, allow_downsample=False)
 
     # Step 2: align the Planet image to that snip (if permitted).
     if allowRegistration:
@@ -671,13 +684,18 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     if downsampleFlag == False:
         downsampled_img = original_planet_img
 
-    # Step 4: mask out any pixels with an NDVI below a given threshold
-    VI_calc_out = calc_VIs(downsampled_img, nodataval=0.0)
-    ndvi = VI_calc_out[0]
-    veg_mask = vegetation_mask(ndvi, threshold=0.70)    # veg_mask is a boolean array
-    # throw Planet image and vegetation mask into set_no_data(). Second output will be Planet scene with mask applied.
-    planet_downsamp_vegmasked = set_no_data(veg_mask, downsampled_img, outfile="planet_with_veg_mask.tif",
-                                            src_nodata=0.0, dst_nodata=0.0)[1]
+    # Step 4: generate a veg mask at Planet resolution, downsample and apply, but save full res for later
+    VI_calc_out_full_res = calc_VIs(image2_aligned, nodataval=0.0)
+    ndvi_full_res = VI_calc_out_full_res[0]
+    veg_mask_full_res_arr = vegetation_mask(ndvi_full_res, threshold=0.0)
+    veg_mask_full_res_img = os.path.join(image2_dir, "veg_mask_full_res.tif")
+    array_to_img(veg_mask_full_res_arr, veg_mask_full_res_img, image2_aligned)
+    # to make this a neat duplicate of the previous method, set_no_data expects veg mask to be an array, not a file
+    veg_mask_downsamp = perform_downsample(veg_mask_full_res_img, 30.0,
+                                           outfile=os.path.join(image2_dir, "veg_mask_downsample.tif"))
+    veg_mask_downsamp_arr = img_to_array(veg_mask_downsamp)
+    planet_downsamp_vegmasked = set_no_data(veg_mask_downsamp_arr, downsampled_img, outfile="planet_with_veg_mask.tif",
+                                           src_nodata=0.0, dst_nodata=0.0)[1]
 
     # Step 5: add no data values into Landsat image so that it will play nice with iMad.py and radcal.py
     landsat_nodata = os.path.split(cropped_img)[1][:-4] + "_nodata.tif"
