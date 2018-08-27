@@ -20,7 +20,7 @@ from iMad import run_MAD
 from radcal import run_radcal
 
 
-def save_VIs(rasterpath, default_out_dir="y", nodataval = 0.0, save_ndvi=True, save_evi=False):
+def save_VIs(rasterpath, out_dir="default", nodataval = 0.0, save_ndvi=True, save_evi=False):
     """
     Generates two new GeoTiffs: the NDVI and EVI for the input raster.
 
@@ -32,8 +32,8 @@ def save_VIs(rasterpath, default_out_dir="y", nodataval = 0.0, save_ndvi=True, s
 
     # grab the directory and original file name, then build new filenames
     dir_src, filename_src = os.path.split(rasterpath)[0], os.path.split(rasterpath)[1]
-    if default_out_dir != "y":
-        dir_src = default_out_dir
+    if out_dir != "default":
+        dir_src = out_dir
     filename_ndvi_src = dir_src + '\\' + filename_src[:-4] + '-NDVI.tif'
     filename_evi_src = dir_src + '\\' + filename_src[:-4] + '-EVI.tif'
 
@@ -51,6 +51,7 @@ def save_VIs(rasterpath, default_out_dir="y", nodataval = 0.0, save_ndvi=True, s
         evi_dst.SetProjection(img_src.GetProjection())
         evi_dst.FlushCache()
         evi_dst = None
+
     # Close up shop
     img_src = None
     src = None
@@ -65,6 +66,7 @@ def calc_VIs(rasterpath, nodataval=0.0):
     :param nodataval: no-data value in the input images
     :return:
     """
+    nodataval = int(nodataval)
     print("Calculating vegetation indices... ")
     # Set EVI coefficients
     G, C1, C2, L = 2.5, 6.0, 7.5, 1.0
@@ -92,7 +94,11 @@ def calc_VIs(rasterpath, nodataval=0.0):
     ndvi = (NIR_band_ma - red_band_ma)/(NIR_band_ma + red_band_ma)
     evi = (NIR_band_ma - red_band_ma)/(NIR_band_ma + C1*red_band_ma - C2*blue_band_ma + L)
 
-    return ndvi, evi, img_src, cols, rows
+    # the new arrays aren't masked, but have masked values filled with the set fill_value (nodataval)
+    ndvi_filled = np.where(ndvi.mask, ndvi.fill_value, ndvi.data)
+    evi_filled = np.where(evi.mask, evi.fill_value, evi.data)
+
+    return ndvi_filled, evi_filled, img_src, cols, rows
 
 
 def vegetation_mask(ndvi, threshold=0.75):
@@ -612,7 +618,7 @@ def diff_images(img1_path, img2_path, outfile=False):
     return "Diff image saved at " + outfile
 
 
-def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits):
+def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, src_nodataval=0.0, dst_nodataval=0.0):
     """
     Purpose: radiometrically calibrate a target image to a reference image.
     Optionally update the georeferencing in the target image.
@@ -622,6 +628,8 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     :param allowDownsample: (bool) whether the target image needs to be downsampled. True if reference and target are different resolutions.
     :param allowRegistration: (bool) whether the target image needs registration
     :param view_radcal_fits: (bool) whether the radcal fits should be displayed
+    :param src_nodataval: (float) no-data value in the input images
+    :param dst_nodataval: (float) no-data value to be applied to the output images
     :return: outpath_final: (str) path to final output image
     """
     start = time.time()
@@ -663,7 +671,8 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
             image_reg_ref = reproj_reg_ref
         if rad_ref_srs != target_srs:
             reproj_target = os.path.join(os.path.split(image2)[0], image2[:-4]+"_reproj.tif")
-            call('gdalwarp -overwrite -s_srs EPSG:' + target_srs + ' -t_srs EPSG:' + rad_ref_srs + ' ' + image2 + ' ' + reproj_target)
+            call('gdalwarp -overwrite -s_srs EPSG:' + target_srs + ' -t_srs EPSG:' + rad_ref_srs + ' ' + image2 + ' '
+                 + reproj_target)
             image2 = reproj_target
 
     # Step 1: grab a Landsat snip that will be used to align the Planet image.
@@ -685,7 +694,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
         downsampled_img = original_planet_img
 
     # Step 4: generate a veg mask at Planet resolution, downsample and apply, but save full res for later
-    VI_calc_out_full_res = calc_VIs(image2_aligned, nodataval=0.0)
+    VI_calc_out_full_res = calc_VIs(image2_aligned, nodataval=dst_nodataval)
     ndvi_full_res = VI_calc_out_full_res[0]
     veg_mask_full_res_arr = vegetation_mask(ndvi_full_res, threshold=0.0)
     veg_mask_full_res_img = os.path.join(image2_dir, "veg_mask_full_res.tif")
@@ -695,12 +704,12 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
                                            outfile=os.path.join(image2_dir, "veg_mask_downsample.tif"))
     veg_mask_downsamp_arr = img_to_array(veg_mask_downsamp)
     planet_downsamp_vegmasked = set_no_data(veg_mask_downsamp_arr, downsampled_img, outfile="planet_with_veg_mask.tif",
-                                           src_nodata=0.0, dst_nodata=0.0)[1]
+                                           src_nodata=src_nodataval, dst_nodata=dst_nodataval)[1]
 
     # Step 5: add no data values into Landsat image so that it will play nice with iMad.py and radcal.py
     landsat_nodata = os.path.split(cropped_img)[1][:-4] + "_nodata.tif"
-    no_data_out_novegmask = set_no_data(downsampled_img, cropped_img, landsat_nodata, dst_nodata=0.0)  # need version that hasn't been masked too.
-    no_data_out_vegmask = set_no_data(planet_downsamp_vegmasked, cropped_img, landsat_nodata, dst_nodata=0.0)
+    no_data_out_novegmask = set_no_data(downsampled_img, cropped_img, landsat_nodata, dst_nodata=dst_nodataval)  # need version that hasn't been masked too.
+    no_data_out_vegmask = set_no_data(planet_downsamp_vegmasked, cropped_img, landsat_nodata, dst_nodata=dst_nodataval)
 
     # at this point, we have a Planet image at Landsat resolution and a Landsat image with Planet no-data values.
     # everything we need for MAD + radcal to run
@@ -726,7 +735,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
                                       image2_aligned, view_plots=view_radcal_fits, add_nodata=True)
     # Step 6: re-apply no-data values to the radiometrically corrected full-resolution planet image
     # necessary since radcal applies the correction to the no-data areas
-    final_images = set_no_data(image2_aligned, normalized_fsoutfile, outfile_final, dst_nodata=0.0, save_mask=True)
+    final_images = set_no_data(image2_aligned, normalized_fsoutfile, outfile_final, dst_nodata=dst_nodataval, save_mask=True)
 
     end = time.time()
     print("===============================")
