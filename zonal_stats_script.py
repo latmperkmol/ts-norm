@@ -44,8 +44,8 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
     """
 
     raster_list = []
-    bands = 1
-    zones = 0
+    bands = 1   # this will get overwritten later.
+    zones = 0   # this will get overwritten later.
 
     # This is not recursive due to break. Does not search subdirectories.
     for dirpath, dirnames, filenames in os.walk(direc):
@@ -94,7 +94,7 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
     for zone in range(zones):
         outname_csv = "zone" + str(zone) + "means.csv"
         outnames.append(outname_csv)
-        export_dict_to_csv(sorted_dict, zone, bands=b, stat=stat, outfilename=outname_csv, out_dir = direc)
+        export_dict_to_csv(sorted_dict, zone, bands=b, stat=stat, outfilename=outname_csv, out_dir=direc)
 
     # start by checking how many bands are present
     if do_despike:

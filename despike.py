@@ -12,7 +12,8 @@ def despike(vector, threshold, known_spikes=[]):
     :param vector: (ndarray) raw data to be despiked.
     :param threshold: (float) number 0-1 determining how much to despike. Lower number -> more despiking
     :param known_spikes:
-    :return:
+    :return: trozo, valuest. trozo is some kind of boolean array.
+        valuest is ndarray of the despiked data
     """
     # TODO: test with known spikes
     # TODO: add ability to despike multiband (2D array) data
