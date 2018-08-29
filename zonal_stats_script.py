@@ -28,24 +28,29 @@ import despike
 from segment_fitter import seg_fit
 
 
-def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_segments=False, doy_array=[]):
+def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_segments=False, doy_array=[], nodata=0.0):
     """
     Run through each raster in the directory. For each raster, calculate some statistics for each zone and each band.
     A dictionary is generated containing each statistic for each raster, band, and zone.
     The dictionary is saved to a JSON file. It is also returned by the function for further use if needed.
     After calculating stats, despike the means.
-    :param direc: directory containing raster files
-    :param shpfile: .shp shapefile containing zones to analyze
-    :param outfilename: filename to be saved in direc
+    :param direc: (string) directory containing raster files
+    :param shpfile: (string) .shp shapefile containing zones to analyze
+    :param outfilename: (string) filename of the dictionary of zonal statistics to be saved in direc
     :param fit_segments: (bool) whether or not to fit segments to despiked data. If yes, a csv with segments will be
         saved in direc
     :param doy_array: (1D numpy array) vector with day of year for each raster in direc
+    :param nodata: (float) no-data value in input rasters
     :return rasters_dict: dictionary with all stats for all bands, all zones, all rasters
     """
 
     raster_list = []
     bands = 1   # this will get overwritten later.
     zones = 0   # this will get overwritten later.
+    load_saved = "n"
+
+    # path of dictionary of zonal stats
+    outfile = os.path.join(direc, outfilename)
 
     # This is not recursive due to break. Does not search subdirectories.
     for dirpath, dirnames, filenames in os.walk(direc):
@@ -56,32 +61,34 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
     # initialize a dictionary, which will hold names of each raster and their corresponding stats for each band+zone.
     rasters_dict = {}
 
+    if os.path.isfile(outfile) == True:
+        print(outfilename + " already exists. ")
+        load_saved = raw_input("Load this file? If not, it will be overwritten. y or n: ")
+
+    if load_saved != "y":
     # begin looping over rasters, calculating rasterstats and adding to dictionary
-    for rasterfile in raster_list:
-        rasterpath = os.path.join(direc, rasterfile)
-        raster = gdal.Open(rasterpath)
-        rastername = rasterfile[:-4]
-        rasterstat = []
-        bands = raster.RasterCount
-        for b in range(bands):
-            b+=1
-            rasterstat.append(zonal_stats(shpfile, rasterpath, band=b, stats=['min', 'max', 'mean', 'median', 'std']))
-        rasters_dict[rastername] = rasterstat
+        for rasterfile in raster_list:
+            rasterpath = os.path.join(direc, rasterfile)
+            raster = gdal.Open(rasterpath)
+            rastername = rasterfile[:-4]
+            rasterstat = []
+            bands = raster.RasterCount
+            for b in range(bands):
+                b+=1
+                rasterstat.append(zonal_stats(shpfile, rasterpath, band=b, stats=['min', 'max', 'mean', 'median', 'std']))
+            rasters_dict[rastername] = rasterstat
 
-    sorted_dict = collections.OrderedDict(sorted(rasters_dict.items()))
+        sorted_dict = collections.OrderedDict(sorted(rasters_dict.items()))
 
-    outfile = os.path.join(direc, outfilename)
-    if os.path.isfile(outfile) == False:
+        # save the dictionary with the zonal stats
         with open(outfile, 'w') as fp:
             json.dump(sorted_dict, fp)
+
     else:
-        overwrite = raw_input(outfilename + " already exists. Overwrite? y or n: ")
-        if overwrite == "y":
-            print("Overwriting. ")
-            with open(outfile, 'w') as fp:
-                json.dump(sorted_dict, fp)
-        else:
-            print("Not saving file. ")
+        print("Loading saved file " + outfile + " ... ")
+        with open(outfile, 'r') as fp:
+            cell_data = json.load(fp)
+        sorted_dict = collections.OrderedDict(sorted(cell_data.items()))
 
     # grab the number of zones in a really, really horrible way. I am so sorry.
     for raster in sorted_dict:
@@ -102,11 +109,14 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
         if bands == 1:
             for zone in range(zones):
                 vector = np.loadtxt(os.path.join(direc, outnames[zone]), delimiter=',')    # load in the vectors
-                despiked_vector = despike.despike(vector, threshold)[1]
-                np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_despiked.csv'), despiked_vector, delimiter=',')
-                # TODO: get segment fitting to work!!
+                # take the vector and compress to remove missing data values
+                compressed_vector, compressed_doy = compress_values(vector, doy_array, nodata=nodata)
+                despiked_vector = despike.despike(compressed_vector, threshold)[1]
+                np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_comp_despiked.csv'), despiked_vector,
+                           delimiter=',')
+                np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_rel_doy.csv'), compressed_doy, delimiter=',')
                 if fit_segments:
-                    segments = seg_fit(despiked_vector, 5, 0.01, doy_array)
+                    segments = seg_fit(despiked_vector, 5, 0.01, compressed_doy)
                     seg_outfile = os.path.join(direc, outnames[zone][:-4] + '_segments.csv')
                     np.savetxt(seg_outfile, segments, delimiter=',')
 
@@ -114,7 +124,8 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
         # run the despike, but only retrieve the first output (spike locations)
         # then compare each of these outputs to see where the concurrent spikes are. store locations in a numpy vector
         # then re-run the despike script, with known_spikes = spike locations from above
-        # TODO: add segment fitting for despiked data
+        # NB: no compression of missing values occurs here!
+        # TODO: add compression of missing values for multi-band
         if bands > 1:
             concurrence_num = min(int(math.floor(b*0.75)), bands-1)     # number of bands with spikes for it to count
             spike_locations = []
@@ -271,9 +282,9 @@ def indices_by_zone(rasters_dict, zone_num):
 
 def get_all_DOY(directory):
     """
-
-    :param directory:
-    :return:
+    Builds a numpy array of the relative day of year (relative to first raster) based on Planet metadata.
+    :param directory: (string) directory containing the Planet metadata JSON files. Files can be in subdirectories.
+    :return rel_DOY: (numpy array) relative day of year, starting at 0
     """
     from datetime import date
     DOY_dict = {}
@@ -309,6 +320,26 @@ def get_all_DOY(directory):
     for i in xrange(1, len(rel_DOY)):
         rel_DOY[i] = rel_DOY[i-1] + delta_DOY[i-1]
     return rel_DOY
+
+
+def compress_values(data_arr, spacing_arr=[], nodata=0.0):
+    """
+    Finds locations in the data array that having missing values (e.g. from no overlap between shpfile feature and raster).
+    Removes these values from the data array, as well as the spacing array.
+    Returns compressed versions of the data array and spacing array.
+    :param data_arr: (ndarray) 1D array of raw data values
+    :param spacing_arr: (ndarray) 1D array of relative spacing between data values (i.e. relative day of year)
+    :param nodata: (float) value signifying a bad data point
+    :return:
+    """
+    masked_data_arr = np.ma.masked_equal(data_arr, nodata)
+    compressed_data_arr = masked_data_arr.compressed()
+    if len(spacing_arr) == len(data_arr):
+        masked_spacing_arr = np.ma.array(spacing_arr, mask=masked_data_arr.mask)
+        compressed_spacing_arr = masked_spacing_arr.compressed()
+        return compressed_data_arr, compressed_spacing_arr
+    else:
+        return compressed_data_arr, spacing_arr
 
 
 if __name__ == '__main__':

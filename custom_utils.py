@@ -618,7 +618,8 @@ def diff_images(img1_path, img2_path, outfile=False):
     return "Diff image saved at " + outfile
 
 
-def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, src_nodataval=0.0, dst_nodataval=0.0):
+def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, src_nodataval=0.0,
+         dst_nodataval=0.0, udm=None):
     """
     Purpose: radiometrically calibrate a target image to a reference image.
     Optionally update the georeferencing in the target image.
@@ -630,6 +631,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     :param view_radcal_fits: (bool) whether the radcal fits should be displayed
     :param src_nodataval: (float) no-data value in the input images
     :param dst_nodataval: (float) no-data value to be applied to the output images
+    :param udm: (string) filepath of a Unusable Data Mask which will be applied to the final image
     :return: outpath_final: (str) path to final output image
     """
     start = time.time()
@@ -735,6 +737,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
                                       image2_aligned, view_plots=view_radcal_fits, add_nodata=True)
     # Step 6: re-apply no-data values to the radiometrically corrected full-resolution planet image
     # necessary since radcal applies the correction to the no-data areas
+    # TODO: add in the UDM application here!
     final_images = set_no_data(image2_aligned, normalized_fsoutfile, outfile_final, dst_nodata=dst_nodataval, save_mask=True)
 
     end = time.time()
