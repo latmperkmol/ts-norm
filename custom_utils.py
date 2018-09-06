@@ -20,6 +20,53 @@ from iMad import run_MAD
 from radcal import run_radcal
 
 
+def process_udm(udm_path, src_nodata=1.0):
+    """
+    Takes a default Planet Unusable Data Mask and compresses it to one bit, where everything originally = 1.0 or greater
+        becomes nodata. Currently still saves as an 8bit file though.
+        NB: Important!! This edits the UDM in place!
+    :param udm_path:
+    :param src_nodata:
+    :return:
+    """
+    file_name, directory = os.path.split(udm_path)
+    src = rasterio.open(udm_path, "r+")
+    src_data = src.read(1)
+    updated_src = np.where(src_data >= 1, 1, src_data)
+    src.write(updated_src, 1)
+    src.nodata = src_nodata
+    src.close()
+    return file_name
+
+
+def udm_merger(rasterpaths, outpath, src_nodata=1.0):
+    """
+    Mosaics UDMs.
+    Assumes that the UDMs already have been processed via udm_merger so that the nodata values are set appropriately.
+    Expects
+    :param rasters:
+    :param directory:
+    :param outpath:
+    :param src_nodata:
+    :return:
+    """
+    from rasterio.merge import merge
+    src_files = []
+    for r in rasterpaths:
+        src = rasterio.open(r, "r+")
+        src.nodata = src_nodata
+        src_files.append(src)
+    mosaic, out_trans = merge(src_files)
+    out_meta = src_files[0].meta.copy()
+    out_meta.update({"driver": "GTiff",
+                     "height": mosaic.shape[1],
+                     "width": mosaic.shape[2],
+                     "transform": out_trans})
+    with rasterio.open(outpath, "w", **out_meta) as dest:
+        dest.write(mosaic)
+    return outpath
+
+
 def save_VIs(rasterpath, out_dir="default", nodataval = 0.0, save_ndvi=True, save_evi=False):
     """
     Generates two new GeoTiffs: the NDVI and EVI for the input raster.
@@ -319,7 +366,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
     :return outfile: (string) filepath of image with no-data values applied
     """
 
-    # TODO: can't really combine these two.
+    # TODO: in array version, number of bands comes from second image. In string/file version, it comes from first.
     if (type(planet_img) == np.ndarray) or (type(planet_img) == np.ma.core.MaskedArray):
 
         # this is essentially just for the vegetation mask (single band) at the moment
@@ -631,7 +678,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     :param view_radcal_fits: (bool) whether the radcal fits should be displayed
     :param src_nodataval: (float) no-data value in the input images
     :param dst_nodataval: (float) no-data value to be applied to the output images
-    :param udm: (string) filepath of a Unusable Data Mask which will be applied to the final image
+    :param udm: (list, tuple, or string) filepath of Unusable Data Mask(s) which will be applied to the final image
     :return: outpath_final: (str) path to final output image
     """
     start = time.time()
@@ -738,7 +785,29 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     # Step 6: re-apply no-data values to the radiometrically corrected full-resolution planet image
     # necessary since radcal applies the correction to the no-data areas
     # TODO: add in the UDM application here!
-    final_images = set_no_data(image2_aligned, normalized_fsoutfile, outfile_final, dst_nodata=dst_nodataval, save_mask=True)
+    if udm:
+        # Documentation on Planet UDM doesn't seem to agree with actual values:
+        # https://assets.planet.com/docs/Planet_Combined_Imagery_Product_Specs_letter_screen.pdf
+        if (type(udm) == list) or (type(udm) == tuple):
+            for raster in udm:
+                # expects each item in the list udm to be a file PATH, not just filename. Updates files in place.
+                process_udm(raster, src_nodata=1.0)
+            merged_udm = os.path.join(os.path.split(udm[0])[0], "merged_udm.tif")
+            udm_merger(udm, merged_udm)
+            udm_as_arr = img_to_array(merged_udm)
+            final_images = set_no_data(udm_as_arr, normalized_fsoutfile, outfile_final, src_nodata=1.0, dst_nodata=dst_nodataval,
+                                      save_mask=True)
+        elif type(udm) == str:
+            # assume that if we got a string, it is a single default UDM filepath that still must be processed.
+            process_udm(udm, src_nodata=1.0)
+            udm_as_arr = img_to_array(udm)
+            final_images = set_no_data(udm_as_arr, normalized_fsoutfile, outfile_final, src_nodata=1.0,
+                                       dst_nodata=dst_nodataval, save_mask=True)
+        else:
+            warnings.warn("Got an unexpected type {} for 'udm'. Proceeding without using udm. ".format(type(udm)))
+    else:
+        final_images = set_no_data(image2_aligned, normalized_fsoutfile, outfile_final, dst_nodata=dst_nodataval,
+                                   save_mask=True)
 
     end = time.time()
     print("===============================")

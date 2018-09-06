@@ -26,9 +26,11 @@ import collections
 import math
 import despike
 from segment_fitter import seg_fit
+from scipy.signal import savgol_filter
 
 
-def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_segments=False, doy_array=[], nodata=0.0):
+def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_segments=False, doy_array=[], nodata=0.0,
+         window_len=11, polyorder=4):
     """
     Run through each raster in the directory. For each raster, calculate some statistics for each zone and each band.
     A dictionary is generated containing each statistic for each raster, band, and zone.
@@ -45,8 +47,8 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
     """
 
     raster_list = []
-    bands = 1   # this will get overwritten later.
-    zones = 0   # this will get overwritten later.
+    zones = 0  # this will get overwritten later.
+    bands = 1  # this will get overwritten later.
     load_saved = "n"
 
     # path of dictionary of zonal stats
@@ -89,6 +91,11 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
         with open(outfile, 'r') as fp:
             cell_data = json.load(fp)
         sorted_dict = collections.OrderedDict(sorted(cell_data.items()))
+        # check the number of bands
+        raster_file = raster_list[0]
+        raster_path = os.path.join(direc, raster_file)
+        raster = gdal.Open(raster_path)
+        bands = raster.RasterCount
 
     # grab the number of zones in a really, really horrible way. I am so sorry.
     for raster in sorted_dict:
@@ -101,7 +108,7 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
     for zone in range(zones):
         outname_csv = "zone" + str(zone) + "means.csv"
         outnames.append(outname_csv)
-        export_dict_to_csv(sorted_dict, zone, bands=b, stat=stat, outfilename=outname_csv, out_dir=direc)
+        export_dict_to_csv(sorted_dict, zone, bands=bands, stat=stat, outfilename=outname_csv, out_dir=direc)
 
     # start by checking how many bands are present
     if do_despike:
@@ -111,7 +118,9 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
                 vector = np.loadtxt(os.path.join(direc, outnames[zone]), delimiter=',')    # load in the vectors
                 # take the vector and compress to remove missing data values
                 compressed_vector, compressed_doy = compress_values(vector, doy_array, nodata=nodata)
-                despiked_vector = despike.despike(compressed_vector, threshold)[1]
+                # apply savitsky-golay filter, then despike
+                smoothed_vector = savgol_filter(compressed_vector, window_len, polyorder, mode='mirror')
+                despiked_vector = despike.despike(smoothed_vector, threshold)[1]
                 np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_comp_despiked.csv'), despiked_vector,
                            delimiter=',')
                 np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_rel_doy.csv'), compressed_doy, delimiter=',')
@@ -127,7 +136,7 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
         # NB: no compression of missing values occurs here!
         # TODO: add compression of missing values for multi-band
         if bands > 1:
-            concurrence_num = min(int(math.floor(b*0.75)), bands-1)     # number of bands with spikes for it to count
+            concurrence_num = min(int(math.floor(bands*0.75)), bands-1)   # number of bands with spikes for it to count
             spike_locations = []
             for zone in range(zones):
                 means_array = np.loadtxt(os.path.join(direc, outnames[zone]), delimiter=',')
@@ -151,13 +160,13 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
     return rasters_dict
 
 
-def export_dict_to_csv(dictionary, zone, bands=4, stat='mean', outfilename = "raster_means.csv", out_dir=os.getcwd()):
+def export_dict_to_csv(dictionary, zone, bands=4, stat='mean', outfilename="raster_means.csv", out_dir=os.getcwd()):
     # goal: create a 2D array: each column is a band, each row is a raster. Values are for given statistics.
 
     # just in case the sorted version wasn't passed
     sorted_dict = collections.OrderedDict(sorted(dictionary.items()))
-    rows = len(sorted_dict)   # number of bands
-    cols = bands   # number of rasters
+    rows = len(sorted_dict)   # number of rasters
+    cols = bands   # number of bands
     vals = np.zeros([rows, cols])   # array where stat values will be assigned
 
     r = 0
@@ -165,7 +174,6 @@ def export_dict_to_csv(dictionary, zone, bands=4, stat='mean', outfilename = "ra
         for band in range(bands):
             vals[r][band] = sorted_dict[raster][band][zone][stat]
         r+=1
-
     # replace any NaN values with 0.0
     np.nan_to_num(vals, copy=False)
     outfilepath = os.path.join(out_dir, outfilename)
