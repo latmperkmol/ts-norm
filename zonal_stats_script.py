@@ -30,7 +30,7 @@ from scipy.signal import savgol_filter
 
 
 def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_segments=False, doy_array=[], nodata=0.0,
-         window_len=11, polyorder=4):
+         num_segs=10, window_len=11, polyorder=4):
     """
     Run through each raster in the directory. For each raster, calculate some statistics for each zone and each band.
     A dictionary is generated containing each statistic for each raster, band, and zone.
@@ -112,7 +112,7 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
 
     # start by checking how many bands are present
     if do_despike:
-        threshold = 0.5
+        threshold = 0.10
         if bands == 1:
             for zone in range(zones):
                 vector = np.loadtxt(os.path.join(direc, outnames[zone]), delimiter=',')    # load in the vectors
@@ -125,7 +125,7 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
                            delimiter=',')
                 np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_rel_doy.csv'), compressed_doy, delimiter=',')
                 if fit_segments:
-                    segments = seg_fit(despiked_vector, 5, 0.01, compressed_doy)
+                    segments = seg_fit(despiked_vector, num_segs, maxerror=0.1, spacing_array=compressed_doy)
                     seg_outfile = os.path.join(direc, outnames[zone][:-4] + '_segments.csv')
                     np.savetxt(seg_outfile, segments, delimiter=',')
 
@@ -135,6 +135,7 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
         # then re-run the despike script, with known_spikes = spike locations from above
         # NB: no compression of missing values occurs here!
         # TODO: add compression of missing values for multi-band
+        # TODO: add segment fitting for multi-band
         if bands > 1:
             concurrence_num = min(int(math.floor(bands*0.75)), bands-1)   # number of bands with spikes for it to count
             spike_locations = []
@@ -154,9 +155,6 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
                     conc_spikes_removed = despike.despike(means_array[:, band], threshold, known_spikes=concurrent_spikes)[1]
                     zone_data[:, band] = conc_spikes_removed
                 np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_despiked.csv'), zone_data, delimiter=',')
-
-    # perform segment fitting
-
     return rasters_dict
 
 

@@ -42,11 +42,10 @@ def process_udm(udm_path, src_nodata=1.0):
 def udm_merger(rasterpaths, outpath, src_nodata=1.0):
     """
     Mosaics UDMs.
-    Assumes that the UDMs already have been processed via udm_merger so that the nodata values are set appropriately.
+    Assumes that the UDMs already have been processed via process_udm so that the nodata values are set appropriately.
     Expects
-    :param rasters:
-    :param directory:
-    :param outpath:
+    :param rasterpaths: (tuple) udm filepaths to be merged
+    :param outpath: (string)
     :param src_nodata:
     :return:
     """
@@ -371,7 +370,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
 
         # this is essentially just for the vegetation mask (single band) at the moment
         gdal.AllRegister()
-        img_nodata_source = planet_img      # the ARRAY with some no-data pixels that will be copied over.
+        img_nodata_source = planet_img      # the file with some no-data pixels that will be copied over.
         img_nodata_target = gdal.Open(cropped_img, gdal.GA_Update)  # file which will have no-data pixels added.
         rows, cols = img_nodata_source.shape
         cols2 = img_nodata_target.RasterXSize
