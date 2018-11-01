@@ -80,8 +80,8 @@ def save_VIs(rasterpath, out_dir="default", nodataval = 0.0, save_ndvi=True, sav
     dir_src, filename_src = os.path.split(rasterpath)[0], os.path.split(rasterpath)[1]
     if out_dir != "default":
         dir_src = out_dir
-    filename_ndvi_src = dir_src + '\\' + filename_src[:-4] + '-NDVI.tif'
-    filename_evi_src = dir_src + '\\' + filename_src[:-4] + '-EVI.tif'
+    filename_ndvi_src = os.path.join(dir_src, filename_src[:-4], '-NDVI.tif')
+    filename_evi_src = os.path.join(dir_src, filename_src[:-4], '-EVI.tif')
 
     if save_ndvi:
         ndvi_dst = gdal.GetDriverByName('GTIff').Create(filename_ndvi_src, cols, rows, 1, gdal.GDT_Float32)

@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def seg_fit(vector, maxsegs, maxerror, spacing_array=[], max_iter=250):
+def seg_fit(vector, maxsegs, maxerror, spacing_array=[], max_iter=1000):
     """
     # Purpose: Given a set of values, fit a series in linear segments
     :param vector: 1D array of values to fit using linear segments

@@ -29,7 +29,7 @@ from segment_fitter import seg_fit
 from scipy.signal import savgol_filter
 
 
-def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_segments=False, doy_array=[], nodata=0.0,
+def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False, fit_segments=False, doy_array=[], nodata=0.0,
          num_segs=10, window_len=11, polyorder=4):
     """
     Run through each raster in the directory. For each raster, calculate some statistics for each zone and each band.
@@ -38,6 +38,7 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
     After calculating stats, despike the means.
     :param direc: (string) directory containing raster files
     :param shpfile: (string) .shp shapefile containing zones to analyze
+    :param out_dir: (string) directory to store output files
     :param outfilename: (string) filename of the dictionary of zonal statistics to be saved in direc
     :param fit_segments: (bool) whether or not to fit segments to despiked data. If yes, a csv with segments will be
         saved in direc
@@ -77,7 +78,7 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
             bands = raster.RasterCount
             for b in range(bands):
                 b+=1
-                rasterstat.append(zonal_stats(shpfile, rasterpath, band=b, stats=['min', 'max', 'mean', 'median', 'std']))
+                rasterstat.append(zonal_stats(shpfile, rasterpath, band=b, stats=['min', 'max', 'mean', 'median', 'count']))
             rasters_dict[rastername] = rasterstat
 
         sorted_dict = collections.OrderedDict(sorted(rasters_dict.items()))
@@ -118,14 +119,20 @@ def main(direc, shpfile, outfilename="cell_data.json", do_despike=False, fit_seg
                 vector = np.loadtxt(os.path.join(direc, outnames[zone]), delimiter=',')    # load in the vectors
                 # take the vector and compress to remove missing data values
                 compressed_vector, compressed_doy = compress_values(vector, doy_array, nodata=nodata)
+                # FIRST we despike, SECOND we interpolate, THIRD we filter.
+                despiked_vector = despike.despike(compressed_vector, threshold)[1]
+                # resample and interpolate so that the values are evenly spaced
+                resamp_doy = np.arange(compressed_doy.max())
+                resamp_vec = np.interp(resamp_doy, compressed_doy, despiked_vector)
                 # apply savitsky-golay filter, then despike
-                smoothed_vector = savgol_filter(compressed_vector, window_len, polyorder, mode='mirror')
-                despiked_vector = despike.despike(smoothed_vector, threshold)[1]
-                np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_comp_despiked.csv'), despiked_vector,
+                smoothed_vector = savgol_filter(resamp_vec, window_len, polyorder, mode='mirror')
+
+                np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_comp_despiked.csv'), smoothed_vector,
                            delimiter=',')
                 np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_rel_doy.csv'), compressed_doy, delimiter=',')
+                np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_resamp_doy.csv'), resamp_doy, delimiter=',')
                 if fit_segments:
-                    segments = seg_fit(despiked_vector, num_segs, maxerror=0.1, spacing_array=compressed_doy)
+                    segments = seg_fit(smoothed_vector, num_segs, maxerror=0.1, spacing_array=resamp_doy, max_iter=1000)
                     seg_outfile = os.path.join(direc, outnames[zone][:-4] + '_segments.csv')
                     np.savetxt(seg_outfile, segments, delimiter=',')
 
@@ -214,12 +221,12 @@ def calculate_raster_properties(dictionary, rasterpath, shapefile):
     for b in range(raster.RasterCount):
         b+=1
         rasterstat.append(zonal_stats(shapefile, rasterpath, band=b,
-                                      stats=['min', 'max', 'mean', 'median', 'std', 'count']))
+                                      stats=['min', 'max', 'mean', 'median', 'count']))
     dictionary[rastername] = rasterstat
     return dictionary
 
 
-def plot_custom(rasters_dict, DOY_array = [], choose_lower_lim = False, choose_upper_lim = False):
+def plot_custom(rasters_dict, DOY_array=[], choose_lower_lim=False, choose_upper_lim=False):
     """
 
     :param rasters_dict: Dictionary containing stats for each band and zone for each raster.
@@ -259,31 +266,6 @@ def plot_custom(rasters_dict, DOY_array = [], choose_lower_lim = False, choose_u
     else:
         ax.set_ylim(bottom=lower_lim, top=upper_lim)
     plt.show()
-
-
-def indices_by_zone(rasters_dict, zone_num):
-    red_mean = np.empty(0)
-    NIR_mean = np.empty(0)
-    red_std = np.empty(0)
-    NIR_std = np.empty(0)
-    blue_mean = np.empty(0)
-    blue_std = np.empty(0)
-    for raster in sorted(rasters_dict):
-        red_mean = np.append(red_mean, (rasters_dict[raster][2][zone_num]['mean']))
-        NIR_mean = np.append(NIR_mean, (rasters_dict[raster][3][zone_num]['mean']))
-        blue_mean = np.append(blue_mean, (rasters_dict[raster][0][zone_num]['mean']))
-        red_std = np.append(red_std, (rasters_dict[raster][2][zone_num]['std']))
-        NIR_std = np.append(NIR_std, (rasters_dict[raster][3][zone_num]['std']))
-        blue_std = np.append(blue_std, (rasters_dict[raster][0][zone_num]['std']))
-
-    zone_NDVI_mean = (NIR_mean - red_mean)/(NIR_mean + red_mean)
-    zone_NDVI_std = (NIR_std - red_std)/(NIR_std + red_std)
-
-    G, C1, C2, L = 2.5, 6.0, 7.5, 1.0
-    zone_EVI_mean = G*(NIR_mean - red_mean)/(NIR_mean + C1*red_mean - C2*blue_mean + L)
-    zone_EVI_std = G*(NIR_std - red_std)/(NIR_std+ C1*red_std - C2*blue_std + L)
-
-    return zone_NDVI_mean, zone_NDVI_std, zone_EVI_mean, zone_EVI_std
 
 
 def get_all_DOY(directory):
@@ -351,4 +333,5 @@ def compress_values(data_arr, spacing_arr=[], nodata=0.0):
 if __name__ == '__main__':
     directory = raw_input("Directory of tif files: ")
     shapefile = raw_input("Path name of shapefile: ")
+    output_dir = raw_input("Directory for outputs: ")
     dict = main(directory, shapefile)
