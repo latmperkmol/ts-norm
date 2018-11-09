@@ -251,6 +251,8 @@ def register_image(in_img, reference_img, mode="REGISTER", transformation="POLYO
 
 def register_image2(target_img, reference_img):
     # this function uses arosics instead of arcpy to be open source. Results differ slightly but look comparable
+    # TODO: document this code!!
+        # TODO: also package my py2 adapted version of arosics nicely
     direc = os.path.split(target_img)[0]
     if target_img.endswith('.tiff'):
         warped_out = target_img[:-5] + "_aligned.tif"

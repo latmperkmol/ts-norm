@@ -14,6 +14,9 @@ with open(filelocation) as fp:
 
 OUTPUT DICTIONARY FORMAT:
 dictionary[rastername][band][zone][stat]
+
+TODO: switch from gdal/rasterio mix to pure rasterio
+TODO: check if output_dir exists, and create it if not
 """
 
 
@@ -29,8 +32,8 @@ from segment_fitter import seg_fit
 from scipy.signal import savgol_filter
 
 
-def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False, fit_segments=False, doy_array=[], nodata=0.0,
-         num_segs=10, window_len=11, polyorder=4):
+def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False, fit_segments=False, doy_array=[],
+         nodata=0.0, num_segs=10, seg_error=0.10, window_len=11, polyorder=4):
     """
     Run through each raster in the directory. For each raster, calculate some statistics for each zone and each band.
     A dictionary is generated containing each statistic for each raster, band, and zone.
@@ -44,6 +47,10 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
         saved in direc
     :param doy_array: (1D numpy array) vector with day of year for each raster in direc
     :param nodata: (float) no-data value in input rasters
+    :param num_segs: (int) number of segments to use in the segment fitting algorithm
+    :param seg_error: (float) number 0-1 with error tolerance of segment fitting algorithm
+    :param window_len: (int) window size for Savitsky-Golay filter
+    :param polyorder: (int) order of polynomial for Savitsky-Golay filter
     :return rasters_dict: dictionary with all stats for all bands, all zones, all rasters
     """
 
@@ -53,7 +60,7 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
     load_saved = "n"
 
     # path of dictionary of zonal stats
-    outfile = os.path.join(direc, outfilename)
+    outfile = os.path.join(out_dir, outfilename)
 
     # This is not recursive due to break. Does not search subdirectories.
     for dirpath, dirnames, filenames in os.walk(direc):
@@ -95,12 +102,12 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
         # check the number of bands
         raster_file = raster_list[0]
         raster_path = os.path.join(direc, raster_file)
-        raster = gdal.Open(raster_path)
+        raster = gdal.Open(raster_path)   # TODO: switch this to rasterio
         bands = raster.RasterCount
 
     # grab the number of zones in a really, really horrible way. I am so sorry.
     for raster in sorted_dict:
-        zones = len(sorted_dict[raster][0])
+        zones = len(sorted_dict[raster][0])   # TODO: switch this to rasterio too
         break
 
     # create a number of CSV files = number of zones. Currently only writes out the means.
@@ -109,14 +116,14 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
     for zone in range(zones):
         outname_csv = "zone" + str(zone) + "means.csv"
         outnames.append(outname_csv)
-        export_dict_to_csv(sorted_dict, zone, bands=bands, stat=stat, outfilename=outname_csv, out_dir=direc)
+        export_dict_to_csv(sorted_dict, zone, bands=bands, stat=stat, outfilename=outname_csv, out_dir=out_dir)
 
     # start by checking how many bands are present
     if do_despike:
         threshold = 0.10
         if bands == 1:
             for zone in range(zones):
-                vector = np.loadtxt(os.path.join(direc, outnames[zone]), delimiter=',')    # load in the vectors
+                vector = np.loadtxt(os.path.join(out_dir, outnames[zone]), delimiter=',')    # load in the vectors
                 # take the vector and compress to remove missing data values
                 compressed_vector, compressed_doy = compress_values(vector, doy_array, nodata=nodata)
                 # FIRST we despike, SECOND we interpolate, THIRD we filter.
@@ -127,13 +134,13 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
                 # apply savitsky-golay filter, then despike
                 smoothed_vector = savgol_filter(resamp_vec, window_len, polyorder, mode='mirror')
 
-                np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_comp_despiked.csv'), smoothed_vector,
+                np.savetxt(os.path.join(out_dir, outnames[zone][:-4] + '_comp_despiked.csv'), smoothed_vector,
                            delimiter=',')
-                np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_rel_doy.csv'), compressed_doy, delimiter=',')
-                np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_resamp_doy.csv'), resamp_doy, delimiter=',')
+                np.savetxt(os.path.join(out_dir, outnames[zone][:-4] + '_rel_doy.csv'), compressed_doy, delimiter=',')
+                np.savetxt(os.path.join(out_dir, outnames[zone][:-4] + '_resamp_doy.csv'), resamp_doy, delimiter=',')
                 if fit_segments:
                     segments = seg_fit(smoothed_vector, num_segs, maxerror=0.1, spacing_array=resamp_doy, max_iter=1000)
-                    seg_outfile = os.path.join(direc, outnames[zone][:-4] + '_segments.csv')
+                    seg_outfile = os.path.join(out_dir, outnames[zone][:-4] + '_segments.csv')
                     np.savetxt(seg_outfile, segments, delimiter=',')
 
         # if multiple bands, check for concurrent spikes first, then despike
@@ -147,21 +154,21 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
             concurrence_num = min(int(math.floor(bands*0.75)), bands-1)   # number of bands with spikes for it to count
             spike_locations = []
             for zone in range(zones):
-                means_array = np.loadtxt(os.path.join(direc, outnames[zone]), delimiter=',')
+                means_array = np.loadtxt(os.path.join(out_dir, outnames[zone]), delimiter=',')
                 zone_data = np.zeros([len(means_array[:, 0]), bands])
                 spikes = np.zeros([len(means_array[:, 0]), bands])  # initialize
                 for band in range(bands):
                     spike_locations.append(despike.despike(means_array[:, band], threshold)[0])
                     spikes[:, band] = spike_locations[band]     # boolean array with location of spikes in each band
                 spikes_fname = "zone" + str(zone) + "_spike_locations.csv"
-                np.savetxt(os.path.join(direc, spikes_fname), spikes, delimiter=',')
-                find_concurrent_spikes(os.path.join(direc, spikes_fname),
-                                       os.path.join(direc, "zone" + str(zone) + "_concurrent_spikes.csv"), concurrence_num)
-                concurrent_spikes = np.loadtxt(os.path.join(direc, "zone" + str(zone) + "_concurrent_spikes.csv"))
+                np.savetxt(os.path.join(out_dir, spikes_fname), spikes, delimiter=',')
+                find_concurrent_spikes(os.path.join(out_dir, spikes_fname),
+                                       os.path.join(out_dir, "zone" + str(zone) + "_concurrent_spikes.csv"), concurrence_num)
+                concurrent_spikes = np.loadtxt(os.path.join(out_dir, "zone" + str(zone) + "_concurrent_spikes.csv"))
                 for band in range(bands):
                     conc_spikes_removed = despike.despike(means_array[:, band], threshold, known_spikes=concurrent_spikes)[1]
                     zone_data[:, band] = conc_spikes_removed
-                np.savetxt(os.path.join(direc, outnames[zone][:-4] + '_despiked.csv'), zone_data, delimiter=',')
+                np.savetxt(os.path.join(out_dir, outnames[zone][:-4] + '_despiked.csv'), zone_data, delimiter=',')
     return rasters_dict
 
 
@@ -334,4 +341,4 @@ if __name__ == '__main__':
     directory = raw_input("Directory of tif files: ")
     shapefile = raw_input("Path name of shapefile: ")
     output_dir = raw_input("Directory for outputs: ")
-    dict = main(directory, shapefile)
+    dict = main(directory, shapefile, output_dir)
