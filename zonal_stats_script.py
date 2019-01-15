@@ -73,7 +73,8 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
 
     if os.path.isfile(outfile) == True:
         print(outfilename + " already exists. ")
-        load_saved = raw_input("Load this file? If not, it will be overwritten. y or n: ")
+        load_saved = input("Load this file? If not, it will be overwritten. y or n: ")
+        assert isinstance(load_saved, str)
 
     if load_saved != "y":
     # begin looping over rasters, calculating rasterstats and adding to dictionary
@@ -242,9 +243,10 @@ def plot_custom(rasters_dict, DOY_array=[], choose_lower_lim=False, choose_upper
     :return:
     """
     import matplotlib.pyplot as plt
-    band_num = int(raw_input("Band number? Count from 0. "))
-    zone_num = int(raw_input("Feature number? Count from 0. "))
+    band_num = int(input("Band number? Count from 0. "))
+    zone_num = int(input("Feature number? Count from 0. "))
     stat = raw_input("Which statistic? ")
+    assert isinstance(stat, str)
     stat_value = []
     for raster in sorted(rasters_dict):
         stat_value.append(rasters_dict[raster][band_num][zone_num][stat])
@@ -260,9 +262,9 @@ def plot_custom(rasters_dict, DOY_array=[], choose_lower_lim=False, choose_upper
         ax.plot(stat_value, 'ko')
 
     if choose_upper_lim == True:
-        upper_lim = int(raw_input("Upper y-limit of plot? "))
+        upper_lim = int(input("Upper y-limit of plot? "))
     if choose_lower_lim == True:
-        lower_lim = int(raw_input("Lower y-limit of plot? "))
+        lower_lim = int(input("Lower y-limit of plot? "))
 
     if (choose_lower_lim == False) and (choose_upper_lim == False):
         ax.set_ylim(bottom=0)
@@ -297,7 +299,7 @@ def get_all_DOY(directory):
                     date_class = date(year, month, day)
                     DOY_dict[ID] = {"date": date_class, "sat_ID": sat_ID}
                 except KeyError:
-                    print "Invalid JSON at " + dirpath + "\\" + filename
+                    print("Invalid JSON at " + dirpath + "\\" + filename)
             dirnames[:] = []
 
     DOY_list = []
@@ -312,7 +314,7 @@ def get_all_DOY(directory):
     for i in range(len(delta_DOY)):   # get difference between each date
         delta_DOY[i] = (DOY_list[i+1] - DOY_list[i]).days
     rel_DOY = np.zeros(len(DOY_list))   # a list of the relative DOYs, counting first entry as day 0
-    for i in xrange(1, len(rel_DOY)):
+    for i in range(1, len(rel_DOY)):
         rel_DOY[i] = rel_DOY[i-1] + delta_DOY[i-1]
     return rel_DOY
 
@@ -338,7 +340,10 @@ def compress_values(data_arr, spacing_arr=[], nodata=0.0):
 
 
 if __name__ == '__main__':
-    directory = raw_input("Directory of tif files: ")
-    shapefile = raw_input("Path name of shapefile: ")
-    output_dir = raw_input("Directory for outputs: ")
+    directory = input("Directory of tif files: ")
+    assert isinstance(directory, str)
+    shapefile = input("Path name of shapefile: ")
+    assert isinstance(shapefile, str)
+    output_dir = input("Directory for outputs: ")
+    assert isinstance(output_dir, str)
     dict = main(directory, shapefile, output_dir)

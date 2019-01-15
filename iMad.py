@@ -88,13 +88,13 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
     if (rows1 != rows) or (cols1 != cols) or (len(pos1) != bands):
         sys.stderr.write("Size mismatch")
         sys.exit(1)
-    print '========================='
-    print '       iMAD'
-    print '========================='
-    print time.asctime()
-    print 'time1: '+file1
-    print 'time2: '+file2
-    print 'Delta    [canonical correlations]'
+    print('=========================')
+    print('       iMAD')
+    print('=========================')
+    print(time.asctime())
+    print('time1: '+file1)
+    print('time2: '+file2)
+    print('Delta    [canonical correlations]')
 #  iteration of MAD
     cpm = auxil.Cpm(2*bands)
     delta = 1.0
@@ -170,7 +170,7 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
         rho=mu*(1-lam)/np.sqrt( (1-lam*a2)*(1-lam*b2) )
 #      stopping criterion
         delta = max(abs(rho-oldrho))
-        print delta,rho
+        print(delta, rho)
         oldrho = rho
 #      tile the sigmas and means
         sigMADs = np.tile(sigma,(cols,1))
@@ -213,6 +213,6 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
     outDataset = None
     inDataset1 = None
     inDataset2 = None
-    print 'result written to: '+outfile
-    print '--------done---------------------'
+    print('result written to: '+outfile)
+    print('--------done---------------------')
     return

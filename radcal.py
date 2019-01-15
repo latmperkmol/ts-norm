@@ -70,7 +70,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         bands = inDataset2.RasterCount
     else:
         return   
-    pos2 =  band_pos1
+    pos2 = band_pos1
     if not pos2:
         return 
     dims=[0,0,cols,rows]

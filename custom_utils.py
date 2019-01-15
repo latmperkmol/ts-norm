@@ -3,6 +3,10 @@
 # >> python custom_utils.py
 # Will prompt for names and file locations of images.
 
+import future
+import past
+import six
+from builtins import input
 import warnings
 warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
@@ -306,6 +310,7 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
         outfile = os.path.join(dir_target, os.path.split(input_big)[1][:-4] + "_trimmed.tif")
 
     # downsample the target image if it is higher resolution than the big image
+    downsampled_target = None
     if allow_downsample:
         if (abs(xres_big) != abs(xres_target)) or (abs(yres_big) != abs(yres_target)):
             print("Downsampling target image...")
@@ -449,6 +454,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
             planet_arr[:, :, band] = np.array(planet.GetRasterBand(band+1).ReadAsArray())
             noDataMask[:, :, band] = planet_arr[:, :, band] == src_nodata
             # Pixels with data marked as 0.0. Pixels with no data marked as 1.0. Could flip this by using: planet_arr[:,:,band] != src_nodata
+            # TODO flip this so that it makes more sense...
 
         new_mask = noDataMask.sum(axis=2)
         new_mask = new_mask != 0     # no-data where new_mask = True, i.e. setup for masked arrays
@@ -475,7 +481,6 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
 
         target_DS.SetGeoTransform(planet.GetGeoTransform())
         target_DS.SetProjection(planet.GetProjection())
-        #target_DS.SetNoDataValue(dst_nodata)
         target_DS.FlushCache()
         target_DS = None
         target = None
@@ -689,7 +694,8 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     below_cloud_thresh = check_for_clouds(image2_dir, tolerance=0.5)
     if below_cloud_thresh == False:
         print("Image is above cloud threshold. Either use a different image or increase threshold.")
-        cloudOverride = raw_input("Override cloud threshold? y/n: ")
+        cloudOverride = input("Override cloud threshold? y/n: ")
+        assert isinstance(cloudOverride, str)
         if cloudOverride == "y":
             print("Cloud threshold overridden. Proceeding with processing. ")
         elif cloudOverride == "n":
@@ -822,10 +828,14 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
 
 if __name__ == '__main__':
 
-    image1 = raw_input("Location of image with desired radiometry (probably Landsat): ")
-    image_reg_ref = raw_input("Location of image with desired georeferencing: ")
-    image2 = raw_input("Location of image to be radiometrically normalized (probably Planet): ")
-    allowDownsample = raw_input("Allow target image to be downsampled if needed? y/n: ")
+    image1 = input("Location of image with desired radiometry (probably Landsat): ")
+    assert isinstance(image1, str)
+    image_reg_ref = input("Location of image with desired georeferencing: ")
+    assert isinstance(image_reg_ref, str)
+    image2 = input("Location of image to be radiometrically normalized (probably Planet): ")
+    assert isinstance(image_reg_ref, str)
+    allowDownsample = input("Allow target image to be downsampled if needed? y/n: ")
+    assert isinstance(allowDownsample, str)
     if allowDownsample == "y":
         allowDownsample = True
     elif allowDownsample == "n":
@@ -833,7 +843,8 @@ if __name__ == '__main__':
     else:
         print("Must choose y or n. Try again.")
         quit()
-    allowRegistration = raw_input("Allow target image to be re-registered if needed? y/n: ")
+    allowRegistration = input("Allow target image to be re-registered if needed? y/n: ")
+    assert isinstance(allowRegistration, str)
     if allowRegistration == "y":
         allowRegistration = True
     elif allowRegistration == "n":
@@ -841,7 +852,8 @@ if __name__ == '__main__':
     else:
         print("Must choose y or n. Try again.")
         quit()
-    view_radcal_fits = raw_input("View radiometric calibration fit? y/n: ")
+    view_radcal_fits = input("View radiometric calibration fit? y/n: ")
+    assert isinstance(view_radcal_fits, str)
     if view_radcal_fits == "y":
         view_radcal_fits = True
     elif view_radcal_fits == "n":
