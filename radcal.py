@@ -92,7 +92,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         imadbands = inDataset3.RasterCount
     else:
         return   
-    dims=[0,0,cols,rows]
+    dims = [0, 0, cols, rows]
     if dims:
         x30,y30,cols,rows = dims
     else:
@@ -118,15 +118,15 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     tst = idx[np.where(np.mod(tmp,3) == 0)]
     trn = idx[np.where(np.mod(tmp,3) > 0)]
     
-    print '========================================='
-    print '             RADCAL'
-    print '========================================='
-    print time.asctime()     
-    print 'reference: '+file1
-    print 'target   : '+file2
-    print 'no-change probability threshold: '+str(ncpThresh)
-    print 'no-change pixels (train): '+str(len(trn))
-    print 'no-change pixels (test): '+str(len(tst))           
+    print('=========================================')
+    print('             RADCAL')
+    print('=========================================')
+    print(time.asctime())
+    print('reference: '+file1)
+    print('target   : '+file2)
+    print('no-change probability threshold: '+str(ncpThresh))
+    print('no-change pixels (train): '+str(len(trn)))
+    print('no-change pixels (test): '+str(len(tst)))
     driver = gdal.GetDriverByName(fmt)    
     outDataset = driver.Create(outfile,cols,rows,bands,GDT_UInt16)
     projection = inDataset1.GetProjection()
@@ -145,20 +145,20 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     for k in pos1:
         x = inDataset1.GetRasterBand(k).ReadAsArray(x10,y10,cols,rows).astype(float).ravel()
         y = inDataset2.GetRasterBand(k).ReadAsArray(x20,y20,cols,rows).astype(float).ravel() 
-        b,a,R = auxil.orthoregress(y[trn],x[trn])
+        b, a, R = auxil.orthoregress(y[trn],x[trn])  # trn is the vector of training points
         mean_tgt, mean_ref, mean_nrm = np.mean(y[tst]), np.mean(x[tst]), np.mean(a+b*y[tst])
         t_test = stats.ttest_rel(x[tst], a+b*y[tst])
         var_tgt, var_ref, var_nrm = np.var(y[tst]), np.var(x[tst]), np.var(a+b*y[tst])
         F_test = auxil.fv_test(x[tst], a+b*y[tst])
-        print '--------------------'
-        print 'spectral band:      ', k
-        print 'slope:              ', b
-        print 'intercept:          ', a
-        print 'correlation:        ', R
-        print 'means(tgt,ref,nrm): ', mean_tgt, mean_ref, mean_nrm
-        print 't-test, p-value:    ', t_test
-        print 'vars(tgt,ref,nrm)   ', var_tgt, var_ref, var_nrm
-        print 'F-test, p-value:    ', F_test
+        print('--------------------')
+        print('spectral band:      ', k)
+        print('slope:              ', b)
+        print('intercept:          ', a)
+        print('correlation:        ', R)
+        print('means(tgt,ref,nrm): ', mean_tgt, mean_ref, mean_nrm)
+        print('t-test, p-value:    ', t_test)
+        print('vars(tgt,ref,nrm)   ', var_tgt, var_ref, var_nrm)
+        print('F-test, p-value:    ', F_test)
         aa.append(a)
         bb.append(b)
         fit_info = {'k':k, 'b':b, 'a':a, 'R':R, 'mean_tgt':mean_tgt, 'mean_ref':mean_ref, 'mean_nrm':mean_nrm,
@@ -185,13 +185,13 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         json.dump(log, write_file)
 
     outDataset = None
-    print 'result written to: '+outfile        
+    print('result written to: '+outfile)
     if fsfile is not None:
         path = os.path.dirname(fsfile)
         basename = os.path.basename(fsfile)
         root, ext = os.path.splitext(basename)
         fsoutfile = path+'/'+root+'_norm'+ext        
-        print 'normalizing '+fsfile+'...' 
+        print('normalizing '+fsfile+'...')
         fsDataset = gdal.Open(fsfile,GA_ReadOnly)
         cols = fsDataset.RasterXSize
         rows = fsDataset.RasterYSize    
@@ -213,9 +213,9 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
             outBand.FlushCache() 
             j += 1      
         outDataset = None    
-        print 'result written to: '+fsoutfile
+        print('result written to: '+fsoutfile)
 
-    print '-------done-----------------------------'
+    print('-------done-----------------------------')
     if fsfile is not None:
         return fsoutfile
     else:

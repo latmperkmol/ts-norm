@@ -253,10 +253,16 @@ def register_image(in_img, reference_img, mode="REGISTER", transformation="POLYO
     return warped_out
 
 
-def register_image2(target_img, reference_img):
+def register_image2(target_img, reference_img, no_data_val=0.0):
+    """
+    Using AROSICS, perform co-registration. Generates and saves a CSV of the tie-points and their shift vectors.
+    Also creates a visualization of how the co-registered image has shifted.
+    :param target_img: image to have geospatial referencing updated
+    :param reference_img: image with target geospatial referencing
+    :param no_data_val: (float) no-data value for the target and reference images
+    :return warped_out: filepath of coregistered version of target_image
+    """
     # this function uses arosics instead of arcpy to be open source. Results differ slightly but look comparable
-    # TODO: document this code!!
-        # TODO: also package my py2 adapted version of arosics nicely
     direc = os.path.split(target_img)[0]
     if target_img.endswith('.tiff'):
         warped_out = target_img[:-5] + "_aligned.tif"
@@ -265,8 +271,9 @@ def register_image2(target_img, reference_img):
     else:
         print("Input image must be a GeoTiff. Exiting.")
         return
-    registered_img = arosics.COREG_LOCAL(reference_img, target_img, 300, path_out=warped_out, nodata=(0.0,0.0),
-                                         fmt_out="GTiff", projectDir=os.path.split(target_img)[0])
+    registered_img = arosics.COREG_LOCAL(reference_img, target_img, 300, path_out=warped_out,
+                                         nodata=(no_data_val, no_data_val), fmt_out="GTiff",
+                                         projectDir=os.path.split(target_img)[0])
     tie_points = registered_img.CoRegPoints_table
     coreg_csv_name = os.path.split(target_img)[1] + "coreg_points.csv"
     coreg_visual_name = os.path.split(target_img)[1] + "coreg_visual.png"
@@ -281,9 +288,13 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
     Trim an image to the dimensions of another (in same projection). Trimmed image is output without overwriting original.
     The larger image, input_big, is trimmed to the dimensions of input_target.
 
-    :param input_big (string): location of a large file to be cropped to smaller dimensions
-    :param input_target (string): location of a smaller file with target dimensions. May be downsampled if it is higher resolution that input_big.
-    :param allow_downsample (bool): True if images are different resolutions.
+    :param input_big: (string) location of a large file to be cropped to smaller dimensions
+    :param input_target: (string) location of a smaller file with target dimensions. May be downsampled if it is higher resolution that input_big.
+    :param allow_downsample: (bool) True if images are different resolutions.
+    :return conductedDownsample: (bool) True if image was downsampled
+    :return downsampled_target: (str) filepath of the downsampled version of input_target
+    :return outfile: (str) filepath of the cropped version of input_big
+    :return input_target: (str) unchanged from input argument
     """
 
     # open the big file, grab its resolution
@@ -315,7 +326,6 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
         if (abs(xres_big) != abs(xres_target)) or (abs(yres_big) != abs(yres_target)):
             print("Downsampling target image...")
             # generate name for downsampled version of image
-            # TODO: make this robust against capitalization and add a better "else" clause
             if input_target.lower().endswith('tiff'):
                 downsampled_target = input_target[:-5] + "_downsample.tif"
             elif input_target.lower().endswith('tif'):
@@ -349,6 +359,13 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
 
 
 def perform_downsample(src_image, target_res, outfile="downsample.tif"):
+    """
+    Quick and dirty wrapper to call CL gdalwarp for downsampling
+    :param src_image:
+    :param target_res:
+    :param outfile:
+    :return:
+    """
     # open source image, grab resolution
     src_DS = gdal.Open(src_image, GA_ReadOnly)
     geotransform = src_DS.GetGeoTransform()
@@ -672,7 +689,7 @@ def diff_images(img1_path, img2_path, outfile=False):
 
 
 def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, src_nodataval=0.0,
-         dst_nodataval=0.0, udm=None):
+         dst_nodataval=0.0, udm=None, outdir=None):
     """
     Purpose: radiometrically calibrate a target image to a reference image.
     Optionally update the georeferencing in the target image.
@@ -685,6 +702,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     :param src_nodataval: (float) no-data value in the input images
     :param dst_nodataval: (float) no-data value to be applied to the output images
     :param udm: (list, tuple, or string) filepath of Unusable Data Mask(s) which will be applied to the final image
+    :param outdir: (str) folder to save all outputs
     :return: outpath_final: (str) path to final output image
     """
     start = time.time()
@@ -705,6 +723,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
             print("Must choose y or n. Try again.")
             return
     # Step 0.5: check to make sure all input images are in the same projection
+    # TODO: switch from gdal to rasterio to reduce image lock issues?
     rad_ref_DS = gdal.Open(image1)
     reg_ref_DS = gdal.Open(image_reg_ref)
     target_DS = gdal.Open(image2)

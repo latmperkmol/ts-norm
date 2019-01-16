@@ -18,7 +18,7 @@ def despike(vector, threshold, known_spikes=[]):
     # TODO: test with known spikes
     # TODO: add ability to despike multiband (2D array) data
     vec = vector
-    if isinstance(vec, basestring):
+    if isinstance(vec, str):
         vec = np.loadtxt(vec)
 
     # If an array containing known spikes is given, only despike those locations
@@ -84,15 +84,15 @@ def despike(vector, threshold, known_spikes=[]):
 
 if __name__ == '__main__':
     # expects files to be despiked to be .CSV
-    location = raw_input("Name of directory or file to despike: ")
-    threshold = float(raw_input("Despike threshold (between 0 and 1): "))
-    spikes = raw_input("Are there known spike locations? y/n: ")
+    location = eval(input("Name of directory or file to despike: "))
+    threshold = float(eval(input("Despike threshold (between 0 and 1): ")))
+    spikes = eval(input("Are there known spike locations? y/n: "))
     if spikes == 'y':
-        spikes = raw_input("File path of file with spikes: ")
+        spikes = eval(input("File path of file with spikes: "))
     elif spikes == 'n':
         spikes = None
     else:
-        print "Only y or n. Try again. "
+        print("Only y or n. Try again. ")
         exit()
 
     if os.path.isfile(location):
@@ -102,7 +102,7 @@ if __name__ == '__main__':
         all_despiked_vectors = []
         for dirpath, dirnames, filenames in os.walk(location):
             for filename in [f for f in filenames if f.endswith(".csv")]:
-                print "Despiking " + filename
+                print("Despiking " + filename)
                 output = despike(os.path.join(dirpath, filename), threshold, spikes)
                 all_despiked_vectors.append(output[1])
                 np.savetxt(os.path.join(location, filename[:-4] + "_despiked.csv"), output[1])

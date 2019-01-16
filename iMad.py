@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #******************************************************************************
 #  Name:     iMad.py
-#  Purpose:  Perfrom IR-MAD change detection on bitemporal, multispectral
+#  Purpose:  Perform IR-MAD change detection on bitemporal, multispectral
 #            imagery 
 #  Usage:             
 #    python iMad.py 
@@ -16,12 +16,14 @@
 #    but WITHOUT ANY WARRANTY; without even the implied warranty of
 #    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #    GNU General Public License for more details.
+#
+#    Modified by Nicholas Leach
 
 import auxil.auxil as auxil
 import numpy as np
 from scipy import linalg, stats
 from osgeo import gdal
-from osgeo.gdalconst import GA_ReadOnly, GDT_Float32, GDT_Int32, GDT_UInt16
+from osgeo.gdalconst import GA_ReadOnly, GDT_UInt16
 import os, sys, time
 
 def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,4], penalty=0.0):
