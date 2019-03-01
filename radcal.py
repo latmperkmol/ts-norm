@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import json
  
 def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_pos1=[1,2,3,4], band_pos2=[1,2,3,4],
-               nochange_thresh=0.95, view_plots=True, add_nodata=True):
+               nochange_thresh=0.95, view_plots=True, datatype_out=GDT_UInt16):
     """
 
     :param image1: Image which will receive radiometric calibration (target image). Include path.
@@ -37,6 +37,8 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     :param band_pos1: positions of the bands to be calibrated in image 1.
     :param band_pos2: positions of the bands to be calibrated in image 2.
     :param nochange_thresh:
+    :param view_plots: (bool) display the radcal fit
+    :param datatype_out: GDT datatype to save radcal file
     :return:
     """
 
@@ -47,7 +49,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
 #  reference image    
     file1 = image2
     if file1:                  
-        inDataset1 = gdal.Open(file1,GA_ReadOnly)     
+        inDataset1 = gdal.Open(file1, GA_ReadOnly)
         cols = inDataset1.RasterXSize
         rows = inDataset1.RasterYSize    
         bands = inDataset1.RasterCount
@@ -128,7 +130,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     print('no-change pixels (train): '+str(len(trn)))
     print('no-change pixels (test): '+str(len(tst)))
     driver = gdal.GetDriverByName(fmt)    
-    outDataset = driver.Create(outfile,cols,rows,bands,GDT_UInt16)
+    outDataset = driver.Create(outfile, cols, rows, bands, datatype_out)
     projection = inDataset1.GetProjection()
     geotransform = inDataset1.GetGeoTransform()
     if geotransform is not None:
@@ -196,7 +198,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         cols = fsDataset.RasterXSize
         rows = fsDataset.RasterYSize    
         driver = fsDataset.GetDriver()
-        outDataset = driver.Create(fsoutfile,cols,rows,bands,GDT_UInt16)
+        outDataset = driver.Create(fsoutfile, cols, rows, bands, datatype_out)
         projection = fsDataset.GetProjection()
         geotransform = fsDataset.GetGeoTransform()
         if geotransform is not None:

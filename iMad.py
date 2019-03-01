@@ -23,10 +23,11 @@ import auxil.auxil as auxil
 import numpy as np
 from scipy import linalg, stats
 from osgeo import gdal
-from osgeo.gdalconst import GA_ReadOnly, GDT_UInt16
+from osgeo.gdalconst import GA_ReadOnly, GDT_UInt16, GDT_Int16, GDT_Float32, GDT_Int32
 import os, sys, time
 
-def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,4], penalty=0.0):
+def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,4], penalty=0.0,
+            datatype_out=GDT_UInt16):
     """
     Tweaked version of iMad which eschews GUI.
     General requirements still required. Input images must have same spatial and spectral dimensions.
@@ -188,7 +189,7 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
         itr += 1
 # write results to disk
     driver = gdal.GetDriverByName(fmt)
-    outDataset = driver.Create(outfile,cols,rows,bands+1,GDT_UInt16)
+    outDataset = driver.Create(outfile,cols,rows,bands+1, datatype_out)
     projection = inDataset1.GetProjection()
     geotransform = inDataset1.GetGeoTransform()
     if geotransform is not None:

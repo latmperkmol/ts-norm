@@ -86,7 +86,9 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
             bands = raster.RasterCount
             for b in range(bands):
                 b+=1
-                rasterstat.append(zonal_stats(shpfile, rasterpath, band=b, stats=['min', 'max', 'mean', 'median', 'count']))
+                rasterstat.append(zonal_stats(shpfile, rasterpath, band=b,
+                                              stats=['min', 'max', 'mean', 'median', 'count']))
+
             rasters_dict[rastername] = rasterstat
 
         sorted_dict = collections.OrderedDict(sorted(rasters_dict.items()))

@@ -376,7 +376,8 @@ def perform_downsample(src_image, target_res, outfile="downsample.tif"):
     return outfile
 
 
-def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_nodata=0.0, save_mask=False):
+def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_nodata=0.0, save_mask=False,
+                datatype_out=gdal.GDT_UInt16):
     """
     Takes in two images- one with no-data values around the perimeter, one without. Applies matching no-data values to the second image and saves as new output.
 
@@ -426,7 +427,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         print("Writing and saving...")
         dir_target = os.path.split(cropped_img)[0]
         outfile = dir_target + '\\' + outfile
-        target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, gdal.GDT_UInt16)
+        target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, datatype_out)
         for band in range(bands):
             target_DS.GetRasterBand(band+1).WriteArray(target_arr[:,:,band])
         target_DS.SetGeoTransform(img_nodata_target.GetGeoTransform())
@@ -449,7 +450,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
 
         dir_target = os.path.split(planet_img)[0]
         outfile = os.path.join(dir_target, outfile)
-        target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, gdal.GDT_UInt16)
+        target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, datatype_out)
 
         if (cols != cols2) or (rows != rows2):
             print("size mismatch. use images with same dimensions.")
@@ -507,7 +508,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         return planet_img, outfile, new_mask
 
 
-def scale_image(img_path, nodata):
+def scale_image(img_path, nodata, datatype_out=gdal.GDT_UInt16):
     """
     Scale the range of values for an image from 0-100.
     First, sets the 2% lowest values to the 2% mark and the 2% highest values to the 98% mark.
@@ -515,6 +516,8 @@ def scale_image(img_path, nodata):
     Then takes the output, sets the lowest value to 0 and the highest to 100.
     Writes a float.
     :param img_path:
+    :param nodata: no-data value in input image
+    :param datatype_out: GDAL data type to save outputs, e.g. gdal.GDT_Float32.
     :return:
     """
     gdal.AllRegister()
@@ -538,7 +541,7 @@ def scale_image(img_path, nodata):
         #bands_array[:,:,band] = temp_array/upper_cutoff*100.
         #bands_array[:, :, band] = temp_array / temp_array.max() * 100.     # maybe restore later
         bands_array.append(temp_array / temp_array.max()*100.)
-        nodata_array = np.where(temp_array==nodata, 1.0, nodata_array)
+        nodata_array = np.where(temp_array == nodata, 1.0, nodata_array)
 
     # if a pixel is no-data in one band, set to no-data in all
     for band in range(bands):
@@ -548,7 +551,7 @@ def scale_image(img_path, nodata):
     dir_target = os.path.split(img_path)[0]
     src_filename = os.path.split(img_path)[1]
     outfile = dir_target + '\\' + src_filename[:-4] + "_scaled.tif"
-    target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, gdal.GDT_Float32)
+    target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, datatype_out)
     for band in range(bands):
         target_DS.GetRasterBand(band + 1).WriteArray(bands_array[band])
     target_DS.SetGeoTransform(img_src.GetGeoTransform())
@@ -556,26 +559,7 @@ def scale_image(img_path, nodata):
     target_DS.FlushCache()
     target_DS = None
     img_src = None
-
     return
-
-
-# THIS FUNCTION IS NO LONGER IN USE.
-def histogram(img_path, bins_count=range(0,1000)):
-    """
-    Histogram function for multi-dimensional array.
-    a = array
-    bins = range of numbers to match
-    """
-    img_src = gdal.Open(img_path)
-    bands = img_src.RasterCount
-    bands_array = []
-    hist = []
-    for band in range(bands):
-        bands_array.append(np.array(img_src.GetRasterBand(band+1).ReadAsArray()).astype(np.float))
-        #hist.append(np.histogram(bands_array, bins=bins_count, range=(0., bands_array[band].max())))
-    #return hist
-    return bands_array
 
 
 def img_to_array(img_path):
@@ -596,12 +580,13 @@ def img_to_array(img_path):
     return bands_array
 
 
-def array_to_img(array, outpath, ref_img):
+def array_to_img(array, outpath, ref_img, datatype_out=gdal.GDT_UInt16):
     """
     # life would be easier if this was a list of arrays for each band, but let's assume it is a 3D numpy array
     :param array: (numpy array) 2D or 3D with pixel values
     :param outpath: (string) filepath for image to be saved
     :param ref_img: filepath to an image where function can grab geotransform and projection. Easier than inputting.
+    :param datatype_out: GDAL data type to save outputs, e.g. gdal.GDT_Float32.
     :return:
     """
 
@@ -614,7 +599,7 @@ def array_to_img(array, outpath, ref_img):
     else:
         bands = 1
 
-    target_DS = gdal.GetDriverByName('GTiff').Create(outpath, cols, rows, bands, gdal.GDT_UInt16)
+    target_DS = gdal.GetDriverByName('GTiff').Create(outpath, cols, rows, bands, datatype_out)
     if bands > 1:
         for band in range(bands):
             target_DS.GetRasterBand(band + 1).WriteArray(array[:, :, band])
@@ -689,7 +674,7 @@ def diff_images(img1_path, img2_path, outfile=False):
 
 
 def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, src_nodataval=0.0,
-         dst_nodataval=0.0, udm=None, outdir=None):
+         dst_nodataval=0.0, udm=None, outdir=None, datatype_out=gdal.GDT_UInt16):
     """
     Purpose: radiometrically calibrate a target image to a reference image.
     Optionally update the georeferencing in the target image.
@@ -702,8 +687,9 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     :param src_nodataval: (float) no-data value in the input images
     :param dst_nodataval: (float) no-data value to be applied to the output images
     :param udm: (list, tuple, or string) filepath of Unusable Data Mask(s) which will be applied to the final image
-    :param outdir: (str) folder to save all outputs
-    :return: outpath_final: (str) path to final output image
+    :param outdir: (str) folder to save all outputs. Not yet functional.
+    :param datatype_out: GDAL data type to save outputs, e.g. gdal.GDT_Float32. Not yet functional.
+    :return: outpath_final: (str) path to final output image.
     """
     start = time.time()
 
@@ -750,7 +736,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
                  + reproj_target)
             image2 = reproj_target
 
-    # Step 1: grab a Landsat snip that will be used to align the Planet image.
+    # Step 1: grab a reference image snip that will be used to align the target image.
     trim_out = trim_to_image(image_reg_ref, image2, allow_downsample=False)
 
     # Step 2: align the Planet image to that snip (if permitted).
