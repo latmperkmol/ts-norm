@@ -26,7 +26,7 @@ import matplotlib.pyplot as plt
 import json
  
 def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_pos1=[1,2,3,4], band_pos2=[1,2,3,4],
-               nochange_thresh=0.95, view_plots=True, datatype_out=GDT_UInt16):
+               nochange_thresh=0.95, view_plots=True, datatype_out=GDT_UInt16, outdir=None):
     """
 
     :param image1: Image which will receive radiometric calibration (target image). Include path.
@@ -43,7 +43,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     """
 
     gdal.AllRegister()
-    path = os.path.split(image1)[0]
+    path, img1_name = os.path.split(image1)
     if path:
         os.chdir(path)      
 #  reference image    
@@ -86,9 +86,13 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         sys.stderr.write("Size mismatch")
         sys.exit(1)             
 #  iMAD image     
-    file3 = iMAD_img
+    file3 = iMAD_img  # TODO: figure out correct path handling here
+    if not os.path.exists(file3):
+        file3 = os.path.join(outdir, os.path.split(iMAD_img)[1])
+        if not os.path.exists(file3):
+            exit("Can't find iMAD image. ")
     if file3:                  
-        inDataset3 = gdal.Open(file3,GA_ReadOnly)     
+        inDataset3 = gdal.Open(file3, GA_ReadOnly)
         cols = inDataset3.RasterXSize
         rows = inDataset3.RasterYSize    
         imadbands = inDataset3.RasterCount
@@ -103,7 +107,11 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         sys.stderr.write("Size mismatch")
         sys.exit(1)    
 #  outfile
-    outfile, fmt = outfile_name, "GTiff"
+    if outdir:
+        dir_target = outdir
+    else:
+        dir_target = path
+    outfile, fmt = os.path.join(dir_target, outfile_name), "GTiff"
     if not outfile:
         return    
 #  full scene
@@ -112,9 +120,9 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     ncpThresh = nochange_thresh
     if ncpThresh is None:
         return                 
-    chisqr = inDataset3.GetRasterBand(imadbands).ReadAsArray(x30,y30,cols,rows).ravel()
-    ncp = 1 - stats.chi2.cdf(chisqr,[imadbands-1])
-    idx = np.where(ncp>ncpThresh)[0]
+    chisqr = inDataset3.GetRasterBand(imadbands).ReadAsArray(x30,y30,cols,rows).ravel()  # chi2 band of iMAD image
+    ncp = 1 - stats.chi2.cdf(chisqr, [imadbands-1])  # NL: chi2 cumulative dist w 'bands' degrees of freedom
+    idx = np.where(ncp > ncpThresh)[0]  # NL: 1D array w indices of pixels above the no-change threshold
 #  split train/test in ratio 2:1 
     tmp = np.asarray(range(len(idx)))
     tst = idx[np.where(np.mod(tmp,3) == 0)]
@@ -145,9 +153,11 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     i = 1
     log = []
     for k in pos1:
+        # TODO: 1) add option to save out the location of invariant pixels ('idx')
+        # TODO: 2) add option to save out the residuals of the regression (comes from auxil)
         x = inDataset1.GetRasterBand(k).ReadAsArray(x10,y10,cols,rows).astype(float).ravel()
         y = inDataset2.GetRasterBand(k).ReadAsArray(x20,y20,cols,rows).astype(float).ravel() 
-        b, a, R = auxil.orthoregress(y[trn],x[trn])  # trn is the vector of training points
+        b, a, R = auxil.orthoregress(y[trn], x[trn])  # trn is the vector of training points
         mean_tgt, mean_ref, mean_nrm = np.mean(y[tst]), np.mean(x[tst]), np.mean(a+b*y[tst])
         t_test = stats.ttest_rel(x[tst], a+b*y[tst])
         var_tgt, var_ref, var_nrm = np.var(y[tst]), np.var(x[tst]), np.var(a+b*y[tst])
@@ -182,14 +192,17 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
                 plt.show()
         i += 1
     # write out a log with radcal fit information
-    log_outpath = os.path.join(path, 'radcal_parameters.json')
+    if img1_name.endswith("downsample.tif"):
+        log_outpath = os.path.join(dir_target, img1_name[:-14] + "radcal_parameters.json")
+    else:
+        log_outpath = os.path.join(dir_target, img1_name[:-4] + 'radcal_parameters.json')
     with open(log_outpath, "w") as write_file:
         json.dump(log, write_file)
 
     outDataset = None
     print('result written to: '+outfile)
     if fsfile is not None:
-        path = os.path.dirname(fsfile)
+        path = dir_target
         basename = os.path.basename(fsfile)
         root, ext = os.path.splitext(basename)
         fsoutfile = path+'/'+root+'_norm'+ext        
