@@ -12,6 +12,7 @@ warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 import json
 import rasterio
+from rasterio.warp import reproject, Resampling
 import numpy as np
 import numpy.ma as ma
 import gdal, osr
@@ -70,11 +71,12 @@ def udm_merger(rasterpaths, outpath, src_nodata=1.0):
     return outpath
 
 
-def save_VIs(rasterpath, out_dir="default", nodataval = 0.0, save_ndvi=True, save_evi=False):
+def save_VIs(rasterpath, outdir=None, nodataval = 0.0, save_ndvi=True, save_evi=False):
     """
     Generates two new GeoTiffs: the NDVI and EVI for the input raster.
 
     :param rasterpath: path to the raster
+    :param outdir: (str) directory to save outputs
     :param nodataval: no-data value in the input images
     :return:
     """
@@ -82,13 +84,15 @@ def save_VIs(rasterpath, out_dir="default", nodataval = 0.0, save_ndvi=True, sav
 
     # grab the directory and original file name, then build new filenames
     dir_src, filename_src = os.path.split(rasterpath)[0], os.path.split(rasterpath)[1]
-    if out_dir != "default":
-        dir_src = out_dir
-    filename_ndvi_src = os.path.join(dir_src, filename_src[:-4], '-NDVI.tif')
-    filename_evi_src = os.path.join(dir_src, filename_src[:-4], '-EVI.tif')
+    if outdir:
+        filename_ndvi_src = os.path.join(outdir, filename_src[:-4] + '-NDVI.tif')
+    else:
+        filename_ndvi_src = os.path.join(dir_src, filename_src[:-4] + '-NDVI.tif')
+    filename_evi_src = os.path.join(dir_src, filename_src[:-4] + '-EVI.tif')
 
+    # TODO: rewrite these two loops to use rasterio to reduce file locks and improve readability
     if save_ndvi:
-        ndvi_dst = gdal.GetDriverByName('GTIff').Create(filename_ndvi_src, cols, rows, 1, gdal.GDT_Float32)
+        ndvi_dst = gdal.GetDriverByName('GTiff').Create(filename_ndvi_src, cols, rows, 1, gdal.GDT_Float32)
         ndvi_dst.GetRasterBand(1).WriteArray(ndvi[:, :])
         ndvi_dst.SetGeoTransform(img_src.GetGeoTransform())
         ndvi_dst.SetProjection(img_src.GetProjection())
@@ -101,7 +105,6 @@ def save_VIs(rasterpath, out_dir="default", nodataval = 0.0, save_ndvi=True, sav
         evi_dst.SetProjection(img_src.GetProjection())
         evi_dst.FlushCache()
         evi_dst = None
-
     # Close up shop
     img_src = None
     src = None
@@ -111,7 +114,7 @@ def save_VIs(rasterpath, out_dir="default", nodataval = 0.0, save_ndvi=True, sav
 def calc_VIs(rasterpath, nodataval=0.0):
     """
     Generates numpy arrays of the NDVI and EVI
-
+    # NB: assumes that blue is band 1, red is band 3, and NIR is band 4 (indexed from 1)
     :param rasterpath: filepath of the raster
     :param nodataval: no-data value in the input images
     :return:
@@ -153,7 +156,7 @@ def calc_VIs(rasterpath, nodataval=0.0):
 
 def vegetation_mask(ndvi, threshold=0.75):
     """
-
+    Create a boolean array selecting all pixels with NDVI above a set a threshold
     :param ndvi: numpy masked array of the NDVI values
     :param threshold: minimum NDVI value required to send a pixel into MAD
     :return: veg_mask: boolean numpy array. 1 -> do not use for MAD. 0 -> usable for MAD.
@@ -223,37 +226,7 @@ def check_for_clouds(dir=".", tolerance=0.5):
         return False
 
 
-# FUNCTION NO LONGER IN USE. 'register_image2()' is used instead.
-def register_image(in_img, reference_img, mode="REGISTER", transformation="POLYORDER0"):
-    """
-    Planet image registration tends to be poor, so it is good to start by registering to a Landsat image.
-    Returns location of a new GeoTiff with updated registration.
-
-    :param in_img: (string) location of Planet image to be realigned.
-    :param reference_img: (string) location of Landsat image with good georeferencing.
-    :param mode: (string) registration mode. Options are "REGISTER", "REGISTER_MS", "RESET", and "CREATE_LINKS". See arcpy documentation for details.
-    :param transformation: (string) method to use for transformation. See arcpy documentation for options. Use POLYORDER0 to just apply shift.
-    :return:
-    """
-    import arcpy
-    links_out = os.path.split(in_img)[0] + "\\links.txt"
-    if in_img.endswith('.tiff'):
-        warped_out = in_img[:-5] + "_aligned.tif"
-    elif in_img.endswith('.tif'):
-        warped_out = in_img[:-4] + "_aligned.tif"
-    else:
-        print("Input image must be a GeoTiff. Exiting. ")
-        return
-    print("Updating georeference data...")
-    arcpy.RegisterRaster_management(in_img, mode, reference_img, transformation_type=transformation,
-                                    output_cpt_link_file=links_out)
-    print("Applying warp...")
-    arcpy.WarpFromFile_management(in_img, warped_out, links_out, "POLYORDER0")
-    print("Georeference data in " + os.path.split(in_img)[1] + " updated to match " + os.path.split(reference_img)[1])
-    return warped_out
-
-
-def register_image2(target_img, reference_img, no_data_val=0.0):
+def register_image2(target_img, reference_img, no_data_val=0.0, outdir=None):
     """
     Using AROSICS, perform co-registration. Generates and saves a CSV of the tie-points and their shift vectors.
     Also creates a visualization of how the co-registered image has shifted.
@@ -263,11 +236,15 @@ def register_image2(target_img, reference_img, no_data_val=0.0):
     :return warped_out: filepath of coregistered version of target_image
     """
     # this function uses arosics instead of arcpy to be open source. Results differ slightly but look comparable
-    direc = os.path.split(target_img)[0]
+    if outdir:
+        direc = outdir
+    else:
+        direc = os.path.split(target_img)[0]
+
     if target_img.endswith('.tiff'):
-        warped_out = target_img[:-5] + "_aligned.tif"
+        warped_out = os.path.join(direc, os.path.split(target_img[:-5])[1] + "_aligned.tif")
     elif target_img.endswith('.tif'):
-        warped_out = target_img[:-4] + "_aligned.tif"
+        warped_out = os.path.join(direc, os.path.split(target_img[:-4])[1] + "_aligned.tif")
     else:
         print("Input image must be a GeoTiff. Exiting.")
         return
@@ -283,7 +260,7 @@ def register_image2(target_img, reference_img, no_data_val=0.0):
     return warped_out
 
 
-def trim_to_image(input_big, input_target, allow_downsample=True):
+def trim_to_image(input_big, input_target, allow_downsample=True, outdir=None):
     """
     Trim an image to the dimensions of another (in same projection). Trimmed image is output without overwriting original.
     The larger image, input_big, is trimmed to the dimensions of input_target.
@@ -294,7 +271,10 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
     :return conductedDownsample: (bool) True if image was downsampled
     :return downsampled_target: (str) filepath of the downsampled version of input_target
     :return outfile: (str) filepath of the cropped version of input_big
-    :return input_target: (str) unchanged from input argument
+    :return input_target: (tuple) first, whether or not downsample was conducted (bool)
+        second, path to the downsampled file (str)
+        third, filepath of the trimmed image
+        fourth,
     """
 
     # open the big file, grab its resolution
@@ -313,8 +293,11 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
     maxx = minx + geoTransform[1] * data_target.RasterXSize
     miny = maxy + geoTransform[5] * data_target.RasterYSize
 
-    # name the output file for the cropped big image. take path from input_target
-    dir_target = os.path.split(input_target)[0]
+    # name the output file for the cropped big image. take path from input_target or specified output directory
+    if outdir:
+        dir_target = outdir
+    else:
+        dir_target = os.path.split(input_target)[0]
     if input_big.endswith('.tiff'):
         outfile = os.path.join(dir_target, os.path.split(input_big)[1][:-5] + "_trimmed.tif")
     else:
@@ -327,14 +310,35 @@ def trim_to_image(input_big, input_target, allow_downsample=True):
             print("Downsampling target image...")
             # generate name for downsampled version of image
             if input_target.lower().endswith('tiff'):
-                downsampled_target = input_target[:-5] + "_downsample.tif"
+                downsampled_target = os.path.join(dir_target, os.path.split(input_target)[1][:-5] + "_downsample.tif")
             elif input_target.lower().endswith('tif'):
-                downsampled_target = input_target[:-4] + "_downsample.tif"
+                downsampled_target = os.path.join(dir_target, os.path.split(input_target)[1][:-4] + "_downsample.tif")
             else:
                 print("It looks like the file extension was " + input_target[:-4])
                 print("Was expecting .tif or .tiff. Try again.")
-                return
+                quit()
             # perform downsampling
+            # TODO: swap this command to rasterio
+            """
+            scale_factor_x = xres_big / xres_target  # will be a value larger than 1
+            scale_factor_y = yres_big / yres_target
+
+            with rasterio.open(input_big) as ref_ds:
+                ref_transform = ref_ds.transform
+                target_transform = ref_transform * rasterio.Affine(ref_transform.a*scale_factor_x,
+                                                                   ref_transform.b, ref_transform.c,
+                                                                   ref_transform.d, ref_transform.d*scale_factor_y,
+                                                                   ref_transform.f)
+                ref_arr = ref_ds.read()
+                kwargs = ref_ds.meta
+                kwargs['transform'] = target_transform
+                with rasterio.open(downsampled_target, 'w', **kwargs) as dst:
+                    for i, band in enumerate(ref_arr, 1):
+                        dest = np.zeros_like(band)
+                        reproject(band, dest, src_transform=ref_transform, src_crs=ref_ds.crs,
+                                  dst_transform=target_transform, dst_crs=ref_ds.crs, resampling=Resampling.bilinear)
+                        dst.write(dest, indexes=i)
+            """
             call('gdalwarp -tr ' + str(abs(xres_big)) + ' ' + str(abs(yres_big)) + ' -r average ' + input_target + ' '
                  + downsampled_target, shell=True)
             # reset data, grab new extent
@@ -366,6 +370,7 @@ def perform_downsample(src_image, target_res, outfile="downsample.tif"):
     :param outfile:
     :return:
     """
+    # TODO: change this whole function to rasterio
     # open source image, grab resolution
     src_DS = gdal.Open(src_image, GA_ReadOnly)
     geotransform = src_DS.GetGeoTransform()
@@ -376,7 +381,7 @@ def perform_downsample(src_image, target_res, outfile="downsample.tif"):
     return outfile
 
 
-def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_nodata=0.0, save_mask=False,
+def set_no_data(planet_img, cropped_img, outfile="out.tif", outdir=None,  src_nodata=0.0, dst_nodata=0.0, save_mask=False,
                 datatype_out=gdal.GDT_UInt16):
     """
     Takes in two images- one with no-data values around the perimeter, one without. Applies matching no-data values to the second image and saves as new output.
@@ -384,15 +389,18 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
     :param planet_img: (string) filepath of Planet image containing some no-data values around the perimeter. Also supports numpy array.
     :param cropped_img: (string) Must have the same bounding box as planet_img, but can have data everywhere. No-data values from planet_img will be added to cropped_img (no overwrite)
     :param outfile: (string) name of output file. DO NOT ADD LOCATION. File location will be added later.
+    :param outdir: (str) directory to save output file
     :param src_nodata: (float) the no-data value in the incoming image.
     :param dst_nodata: (float) the no-data value in the output image.
+    :param save_mask: (bool) save the mask as a GeoTiff
+    :param datatype_out: (gdal datatype) desired filetype for the output file
     :return planet image: unchanged from input
     :return outfile: (string) filepath of image with no-data values applied
     """
 
-    # TODO: in array version, number of bands comes from second image. In string/file version, it comes from first.
+    # array version:
     if (type(planet_img) == np.ndarray) or (type(planet_img) == np.ma.core.MaskedArray):
-
+        # this is the case where the inputs are arrays
         # this is essentially just for the vegetation mask (single band) at the moment
         gdal.AllRegister()
         img_nodata_source = planet_img      # the file with some no-data pixels that will be copied over.
@@ -415,18 +423,21 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
             dst_nodata_arr.fill(dst_nodata)
 
         print("Building no-data array...")
-        noDataMask = (img_nodata_source == src_nodata)  # Pixels with data marked as 0.0. Pixels with no data marked as 1.0.
-        noDataMask = noDataMask.astype(bool)
+        no_data_mask = (img_nodata_source == src_nodata)  # Pixels with data marked as 0.0. Pixels with no data marked as 1.0.
+        no_data_mask = no_data_mask.astype(bool)
 
         print("Applying no-data array...")
         for band in range(bands):
             target_arr[:, :, band] = np.array(img_nodata_target.GetRasterBand(band + 1).ReadAsArray())
-            target_arr[:, :, band] = np.where(noDataMask[:, :], dst_nodata_arr[:, :], target_arr[:, :, band])
-            target_arr[:, :, band] = ma.array(target_arr[:, :, band], mask=noDataMask, fill_value=dst_nodata)
+            target_arr[:, :, band] = np.where(no_data_mask[:, :], dst_nodata_arr[:, :], target_arr[:, :, band])
+            target_arr[:, :, band] = ma.array(target_arr[:, :, band], mask=no_data_mask, fill_value=dst_nodata)
 
         print("Writing and saving...")
-        dir_target = os.path.split(cropped_img)[0]
-        outfile = dir_target + '\\' + outfile
+        if outdir:
+            dir_target = outdir
+        else:
+            dir_target = os.path.split(cropped_img)[0]
+        outfile = os.path.join(dir_target, outfile)
         target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, datatype_out)
         for band in range(bands):
             target_DS.GetRasterBand(band+1).WriteArray(target_arr[:,:,band])
@@ -436,19 +447,24 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         target_DS = None
         img_nodata_target = None
         print("Done setting no-data!")
-        return img_nodata_source, outfile, noDataMask
+        return img_nodata_source, outfile, no_data_mask
 
+    # disk-based file version
     else:
+        # this is the case where the inputs are files on disk
         gdal.AllRegister()
         planet = gdal.Open(planet_img)
         target = gdal.Open(cropped_img, gdal.GA_Update)
-        bands = planet.RasterCount
+        bands = target.RasterCount
         cols = planet.RasterXSize
         rows = planet.RasterYSize
         cols2 = target.RasterXSize
         rows2 = target.RasterYSize
 
-        dir_target = os.path.split(planet_img)[0]
+        if outdir:
+            dir_target = outdir
+        else:
+            dir_target = os.path.split(cropped_img)[0]
         outfile = os.path.join(dir_target, outfile)
         target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, datatype_out)
 
@@ -459,7 +475,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         planet_arr = np.zeros([rows, cols, bands])
         target_arr = np.zeros([rows, cols, bands])
         target_arr = ma.masked_array(target_arr, fill_value=0.0)
-        noDataMask = np.zeros([rows, cols, bands])
+        no_data_mask = np.zeros([rows, cols, bands])
         src_nodata_arr = np.zeros([rows, cols])      # Fill this array with the no-data value
         if src_nodata != 0.0:
             src_nodata_arr.fill(src_nodata)
@@ -470,22 +486,22 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         print("Building no-data array...")
         for band in range(bands):
             planet_arr[:, :, band] = np.array(planet.GetRasterBand(band+1).ReadAsArray())
-            noDataMask[:, :, band] = planet_arr[:, :, band] == src_nodata
+            no_data_mask[:, :, band] = planet_arr[:, :, band] == src_nodata
             # Pixels with data marked as 0.0. Pixels with no data marked as 1.0. Could flip this by using: planet_arr[:,:,band] != src_nodata
             # TODO flip this so that it makes more sense...
 
-        new_mask = noDataMask.sum(axis=2)
+        new_mask = no_data_mask.sum(axis=2)
         new_mask = new_mask != 0     # no-data where new_mask = True, i.e. setup for masked arrays
 
         print("Applying no-data array...")
         for band in range(bands):
             target_arr[:, :, band] = np.array(target.GetRasterBand(band+1).ReadAsArray())
-            target_arr[:, :, band] = np.where(noDataMask[:, :, band], dst_nodata_arr[:, :], target_arr[:, :, band])
+            target_arr[:, :, band] = np.where(no_data_mask[:, :, band], dst_nodata_arr[:, :], target_arr[:, :, band])
             target_arr[:, :, band] = ma.array(target_arr[:, :, band], mask=new_mask, fill_value=dst_nodata)
 
         print("Writing and saving...")
         for band in range(bands):
-            target_DS.GetRasterBand(band+1).WriteArray(target_arr[:,:,band])
+            target_DS.GetRasterBand(band+1).WriteArray(target_arr[:, :, band])
 
         if save_mask:
             print("Saving no-data mask...")
@@ -508,7 +524,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", src_nodata=0.0, dst_
         return planet_img, outfile, new_mask
 
 
-def scale_image(img_path, nodata, datatype_out=gdal.GDT_UInt16):
+def scale_image(img_path, nodata, outdir=None, datatype_out=gdal.GDT_UInt16):
     """
     Scale the range of values for an image from 0-100.
     First, sets the 2% lowest values to the 2% mark and the 2% highest values to the 98% mark.
@@ -548,9 +564,12 @@ def scale_image(img_path, nodata, datatype_out=gdal.GDT_UInt16):
         # np.place(bands_array[:,:,band], nodata_array==1.0, nodata)    # maybe restore later
         np.place(bands_array[band], nodata_array==1.0, nodata)
 
-    dir_target = os.path.split(img_path)[0]
+    if outdir:
+        dir_target = outdir
+    else:
+        dir_target = os.path.split(img_path)[0]
     src_filename = os.path.split(img_path)[1]
-    outfile = dir_target + '\\' + src_filename[:-4] + "_scaled.tif"
+    outfile = os.path.join(dir_target, src_filename[:-4] + "_scaled.tif")
     target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, datatype_out)
     for band in range(bands):
         target_DS.GetRasterBand(band + 1).WriteArray(bands_array[band])
@@ -564,7 +583,7 @@ def scale_image(img_path, nodata, datatype_out=gdal.GDT_UInt16):
 
 def img_to_array(img_path):
     """
-    Returns a list of arrays for a multiband image. Returns a signle numpy array for a single band image.
+    Returns a list of arrays for a multiband image. Returns a single numpy array for a single band image.
     :param img_path:
     :return:
     """
@@ -582,7 +601,7 @@ def img_to_array(img_path):
 
 def array_to_img(array, outpath, ref_img, datatype_out=gdal.GDT_UInt16):
     """
-    # life would be easier if this was a list of arrays for each band, but let's assume it is a 3D numpy array
+    Life would be easier if this was a list of arrays for each band, but let's assume it is a 3D numpy array
     :param array: (numpy array) 2D or 3D with pixel values
     :param outpath: (string) filepath for image to be saved
     :param ref_img: filepath to an image where function can grab geotransform and projection. Easier than inputting.
@@ -673,14 +692,14 @@ def diff_images(img1_path, img2_path, outfile=False):
     return "Diff image saved at " + outfile
 
 
-def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, src_nodataval=0.0,
+def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistration, view_radcal_fits, src_nodataval=0.0,
          dst_nodataval=0.0, udm=None, outdir=None, datatype_out=gdal.GDT_UInt16):
     """
     Purpose: radiometrically calibrate a target image to a reference image.
     Optionally update the georeferencing in the target image.
-    :param image1: (str) filepath of radiometry reference image
+    :param image_ref: (str) filepath of radiometry reference image
     :param image_reg_ref: (str) filepath of geolocation reference image
-    :param image2: (str) filepath of target image
+    :param image_targ: (str) filepath of target image
     :param allowDownsample: (bool) whether the target image needs to be downsampled. True if reference and target are different resolutions.
     :param allowRegistration: (bool) whether the target image needs registration
     :param view_radcal_fits: (bool) whether the radcal fits should be displayed
@@ -692,10 +711,9 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     :return: outpath_final: (str) path to final output image.
     """
     start = time.time()
-
     # Step 0: check image metadata to see if it has an acceptable level of cloud.
-    image2_dir = os.path.split(image2)[0]
-    below_cloud_thresh = check_for_clouds(image2_dir, tolerance=0.5)
+    image_targ_dir = os.path.split(image_targ)[0]
+    below_cloud_thresh = check_for_clouds(image_targ_dir, tolerance=0.5)
     if below_cloud_thresh == False:
         print("Image is above cloud threshold. Either use a different image or increase threshold.")
         cloudOverride = input("Override cloud threshold? y/n: ")
@@ -708,11 +726,19 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
         else:
             print("Must choose y or n. Try again.")
             return
+    # create output directory if it does not yet exist
+    if outdir:
+        if not os.path.isdir(outdir):
+            print("Making the output directory " + outdir)
+            os.mkdir(outdir)
+    else:
+        print("Not making an output directory. ")
+
     # Step 0.5: check to make sure all input images are in the same projection
     # TODO: switch from gdal to rasterio to reduce image lock issues?
-    rad_ref_DS = gdal.Open(image1)
+    rad_ref_DS = gdal.Open(image_ref)
     reg_ref_DS = gdal.Open(image_reg_ref)
-    target_DS = gdal.Open(image2)
+    target_DS = gdal.Open(image_targ)
     rad_ref_prj = rad_ref_DS.GetProjection()
     reg_ref_prj = reg_ref_DS.GetProjection()
     target_prj = target_DS.GetProjection()
@@ -726,28 +752,47 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
         print("Projection of the radiometric reference: " + str('EPSG:'+rad_ref_srs))
         print("Projection of the registration reference: " + str('EPSG:'+reg_ref_srs))
         print("Projection of the target image: " + str('EPSG:'+target_srs))
+        # TODO: rewrite these using rasterio?
         if rad_ref_srs != reg_ref_srs:
-            reproj_reg_ref = os.path.join(os.path.split(image_reg_ref)[0], "reg_ref_reprojected.tif")
+            if outdir:
+                dir_target = outdir
+            else:
+                dir_target = os.path.split(image_reg_ref)[0]
+            reproj_reg_ref = os.path.join(dir_target, "reg_ref_reprojected.tif")
             call('gdalwarp -t_srs EPSG:' + rad_ref_srs + ' ' + image_reg_ref + ' ' + reproj_reg_ref)
             image_reg_ref = reproj_reg_ref
         if rad_ref_srs != target_srs:
-            reproj_target = os.path.join(os.path.split(image2)[0], image2[:-4]+"_reproj.tif")
-            call('gdalwarp -overwrite -s_srs EPSG:' + target_srs + ' -t_srs EPSG:' + rad_ref_srs + ' ' + image2 + ' '
+            if outdir:
+                dir_target = outdir
+            else:
+                dir_target = os.path.split(image_targ)[0]
+            reproj_target = os.path.join(dir_target, image_targ[:-4] + "_reproj.tif")
+            call('gdalwarp -overwrite -s_srs EPSG:' + target_srs + ' -t_srs EPSG:' + rad_ref_srs + ' ' + image_targ + ' '
                  + reproj_target)
-            image2 = reproj_target
-
+            image_targ = reproj_target
+    # while the files are open, also grab resolution and number of bands
+    bands_ref = rad_ref_DS.RasterCount
+    bands_targ = target_DS.RasterCount
+    res_ref_x = abs(rad_ref_DS.GetGeoTransform()[1])
+    res_ref_y = abs(rad_ref_DS.GetGeoTransform()[5])
+    res_targ_x = abs(target_DS.GetGeoTransform()[1])
+    res_targ_y = abs(target_DS.GetGeoTransform()[5])
+    # close files
+    del rad_ref_DS
+    del reg_ref_DS
+    del target_DS
     # Step 1: grab a reference image snip that will be used to align the target image.
-    trim_out = trim_to_image(image_reg_ref, image2, allow_downsample=False)
+    trim_out = trim_to_image(image_reg_ref, image_targ, allow_downsample=False, outdir=outdir)
 
     # Step 2: align the Planet image to that snip (if permitted).
     if allowRegistration:
-        image2_aligned = register_image2(image2, trim_out[2])
+        image2_aligned = register_image2(image_targ, trim_out[2], outdir=outdir)
         # out is a full-resolution image. 2nd arg is cropped reference image.
     else:
-        image2_aligned = image2
+        image2_aligned = image_targ  # keep in mind that this has a path attached
 
     # Step 3: create a new Landsat snip to match aligned Planet image.
-    trim_out = trim_to_image(image1, image2_aligned, allowDownsample)
+    trim_out = trim_to_image(image_ref, image2_aligned, allowDownsample, outdir=outdir)
     # note on next line: downsampled_img may or may not exist, depending if downsampling occurred.
     # trim_out[1:3] are all strings which include file location.
     downsampleFlag, downsampled_img, cropped_img, original_planet_img = trim_out  # downsampled_img has good alignment
@@ -758,19 +803,26 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     VI_calc_out_full_res = calc_VIs(image2_aligned, nodataval=dst_nodataval)
     ndvi_full_res = VI_calc_out_full_res[0]
     veg_mask_full_res_arr = vegetation_mask(ndvi_full_res, threshold=0.0)
-    veg_mask_full_res_img = os.path.join(image2_dir, "veg_mask_full_res.tif")
+    if outdir:
+        dir_veg_mask = outdir
+    else:
+        dir_veg_mask = image_targ_dir
+    veg_mask_full_res_img = os.path.join(dir_veg_mask, "veg_mask_full_res.tif")
     array_to_img(veg_mask_full_res_arr, veg_mask_full_res_img, image2_aligned)
     # to make this a neat duplicate of the previous method, set_no_data expects veg mask to be an array, not a file
-    veg_mask_downsamp = perform_downsample(veg_mask_full_res_img, 30.0,
-                                           outfile=os.path.join(image2_dir, "veg_mask_downsample.tif"))
+    # resolution in the following call assumes square pixels
+    veg_mask_downsamp = perform_downsample(veg_mask_full_res_img, res_ref_x,
+                                           outfile=os.path.join(dir_veg_mask, "veg_mask_downsample.tif"))
     veg_mask_downsamp_arr = img_to_array(veg_mask_downsamp)
     planet_downsamp_vegmasked = set_no_data(veg_mask_downsamp_arr, downsampled_img, outfile="planet_with_veg_mask.tif",
-                                           src_nodata=src_nodataval, dst_nodata=dst_nodataval)[1]
+                                            outdir=outdir, src_nodata=src_nodataval, dst_nodata=dst_nodataval)[1]
 
     # Step 5: add no data values into Landsat image so that it will play nice with iMad.py and radcal.py
     landsat_nodata = os.path.split(cropped_img)[1][:-4] + "_nodata.tif"
-    no_data_out_novegmask = set_no_data(downsampled_img, cropped_img, landsat_nodata, dst_nodata=dst_nodataval)  # need version that hasn't been masked too.
-    no_data_out_vegmask = set_no_data(planet_downsamp_vegmasked, cropped_img, landsat_nodata, dst_nodata=dst_nodataval)
+    no_data_out_novegmask = set_no_data(downsampled_img, cropped_img, landsat_nodata, outdir=outdir,
+                                        dst_nodata=dst_nodataval)  # need version that hasn't been masked too.
+    no_data_out_vegmask = set_no_data(planet_downsamp_vegmasked, cropped_img, landsat_nodata, outdir=outdir,
+                                      dst_nodata=dst_nodataval)
 
     # at this point, we have a Planet image at Landsat resolution and a Landsat image with Planet no-data values.
     # everything we need for MAD + radcal to run
@@ -784,19 +836,17 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     print("===============================")
     print("Time elapsed: " + str(int(end-start)) + " seconds")
     print("===============================")
-    print()
     print("Beginning MAD...")
     outfile_MAD = os.path.split(planet_img_novegmask)[1][:-4] + "_MAD.tif"
     outfile_RAD = os.path.split(planet_img_novegmask)[1][:-4] + "_RAD.tif"
-    outfile_final = os.path.split(image2)[1][:-4] + "_FINAL.tif"
-    run_MAD(planet_img_vegmask, landsat_img_vegmask, outfile_MAD)
+    outfile_final = os.path.split(image_targ)[1][:-4] + "_FINAL.tif"
+    run_MAD(planet_img_vegmask, landsat_img_vegmask, outfile_MAD, outdir=outdir)
     # image2_aligned is the full resolution Planet scene
     print("Beginning radcal...")
     normalized_fsoutfile = run_radcal(planet_img_novegmask, landsat_img_novegmask, outfile_RAD, outfile_MAD,
-                                      image2_aligned, view_plots=view_radcal_fits, add_nodata=True)
+                                      image2_aligned, view_plots=view_radcal_fits, outdir=outdir)
     # Step 6: re-apply no-data values to the radiometrically corrected full-resolution planet image
     # necessary since radcal applies the correction to the no-data areas
-    # TODO: add in the UDM application here!
     if udm:
         # Documentation on Planet UDM doesn't seem to agree with actual values:
         # https://assets.planet.com/docs/Planet_Combined_Imagery_Product_Specs_letter_screen.pdf
@@ -807,8 +857,8 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
             merged_udm = os.path.join(os.path.split(udm[0])[0], "merged_udm.tif")
             udm_merger(udm, merged_udm)
             udm_as_arr = img_to_array(merged_udm)
-            final_images = set_no_data(udm_as_arr, normalized_fsoutfile, outfile_final, src_nodata=1.0, dst_nodata=dst_nodataval,
-                                      save_mask=True)
+            final_images = set_no_data(udm_as_arr, normalized_fsoutfile, outfile_final, src_nodata=1.0,
+                                       dst_nodata=dst_nodataval, save_mask=True)
         elif type(udm) == str:
             # assume that if we got a string, it is a single default UDM filepath that still must be processed.
             process_udm(udm, src_nodata=1.0)
@@ -819,7 +869,7 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
             warnings.warn("Got an unexpected type {} for 'udm'. Proceeding without using udm. ".format(type(udm)))
     else:
         final_images = set_no_data(image2_aligned, normalized_fsoutfile, outfile_final, dst_nodata=dst_nodataval,
-                                   save_mask=True)
+                                   save_mask=True, outdir=outdir)
 
     end = time.time()
     print("===============================")
@@ -827,18 +877,24 @@ def main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view
     print("Final image at: ")
     print(outfile_final)
     print("Total time elapsed: " + str(int(end-start)) + " seconds")
-    outpath_final = os.path.join(os.path.split(image1)[0], outfile_final)
+    if outdir:
+        dir_out_final = outdir
+    else:
+        dir_out_final = os.path.split(image_ref)[0]
+    outpath_final = os.path.join(dir_out_final, outfile_final)
 
     return outpath_final
 
-if __name__ == '__main__':
 
-    image1 = input("Location of image with desired radiometry (probably Landsat): ")
+if __name__ == '__main__':
+    image1 = input("Location of image with reference radiometry: ")
     assert isinstance(image1, str)
     image_reg_ref = input("Location of image with desired georeferencing: ")
     assert isinstance(image_reg_ref, str)
-    image2 = input("Location of image to be radiometrically normalized (probably Planet): ")
+    image2 = input("Location of target image to be radiometrically normalized : ")
     assert isinstance(image_reg_ref, str)
+    output_dir = input("Location of directory to save outputs? (will be created if does not exist): ")
+    assert isinstance(output_dir, str)
     allowDownsample = input("Allow target image to be downsampled if needed? y/n: ")
     assert isinstance(allowDownsample, str)
     if allowDownsample == "y":
@@ -866,4 +922,4 @@ if __name__ == '__main__':
     else:
         print("Must choose y or n. Try again.")
         quit()
-    main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits)
+    main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, outdir=output_dir)

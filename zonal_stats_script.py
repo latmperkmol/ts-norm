@@ -33,7 +33,7 @@ from scipy.signal import savgol_filter
 
 
 def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False, fit_segments=False, doy_array=[],
-         nodata=0.0, num_segs=10, seg_error=0.10, window_len=11, polyorder=4):
+         nodata=0.0, num_segs=10, seg_error=0.10, window_len=11, polyorder=4, threshold=0.10):
     """
     Run through each raster in the directory. For each raster, calculate some statistics for each zone and each band.
     A dictionary is generated containing each statistic for each raster, band, and zone.
@@ -51,6 +51,7 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
     :param seg_error: (float) number 0-1 with error tolerance of segment fitting algorithm
     :param window_len: (int) window size for Savitsky-Golay filter
     :param polyorder: (int) order of polynomial for Savitsky-Golay filter
+    :param threshold: (float) number between 0-1 (exclusive of 1) for despiking. Lower = less despiking.
     :return rasters_dict: dictionary with all stats for all bands, all zones, all rasters
     """
 
@@ -64,7 +65,7 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
 
     # This is not recursive due to break. Does not search subdirectories.
     for dirpath, dirnames, filenames in os.walk(direc):
-        for filename in [f for f in filenames if f.endswith(".tif")]:
+        for filename in [f for f in filenames if f.lower().endswith(".tif")]:
             raster_list.append(filename)  # this should include filenames that are machine-callable
         break
 
@@ -87,7 +88,7 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
             for b in range(bands):
                 b+=1
                 rasterstat.append(zonal_stats(shpfile, rasterpath, band=b,
-                                              stats=['min', 'max', 'mean', 'median', 'count']))
+                                              stats=['min', 'max', 'mean', 'median', 'count'], nodata=nodata))
 
             rasters_dict[rastername] = rasterstat
 
@@ -105,12 +106,12 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
         # check the number of bands
         raster_file = raster_list[0]
         raster_path = os.path.join(direc, raster_file)
-        raster = gdal.Open(raster_path)   # TODO: switch this to rasterio
+        raster = gdal.Open(raster_path)
         bands = raster.RasterCount
 
-    # grab the number of zones in a really, really horrible way. I am so sorry.
+    # grab the number of zones
     for raster in sorted_dict:
-        zones = len(sorted_dict[raster][0])   # TODO: switch this to rasterio too
+        zones = len(sorted_dict[raster][0])
         break
 
     # create a number of CSV files = number of zones. Currently only writes out the means.
@@ -123,7 +124,6 @@ def main(direc, shpfile, out_dir, outfilename="cell_data.json", do_despike=False
 
     # start by checking how many bands are present
     if do_despike:
-        threshold = 0.10
         if bands == 1:
             for zone in range(zones):
                 vector = np.loadtxt(os.path.join(out_dir, outnames[zone]), delimiter=',')    # load in the vectors
@@ -247,7 +247,7 @@ def plot_custom(rasters_dict, DOY_array=[], choose_lower_lim=False, choose_upper
     import matplotlib.pyplot as plt
     band_num = int(input("Band number? Count from 0. "))
     zone_num = int(input("Feature number? Count from 0. "))
-    stat = raw_input("Which statistic? ")
+    stat = input("Which statistic? ")
     assert isinstance(stat, str)
     stat_value = []
     for raster in sorted(rasters_dict):

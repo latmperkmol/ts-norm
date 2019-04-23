@@ -21,7 +21,7 @@ import sys, os, time
 import numpy as np 
 from scipy import stats
 from osgeo import gdal
-from osgeo.gdalconst import GA_ReadOnly, GDT_Float32, GDT_Int32, GDT_UInt16
+from osgeo.gdalconst import GA_ReadOnly, GDT_Float32, GDT_Int32, GDT_UInt16, GDT_Byte
 import matplotlib.pyplot as plt
 import json
  
@@ -41,6 +41,8 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     :param datatype_out: GDT datatype to save radcal file
     :return:
     """
+    save_residuals = True  # TODO: make this an optional argument
+    save_invariant = True
 
     gdal.AllRegister()
     path, img1_name = os.path.split(image1)
@@ -152,16 +154,21 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     bb = []  
     i = 1
     log = []
+    residuals = []  # list to save residuals
     for k in pos1:
         # TODO: 1) add option to save out the location of invariant pixels ('idx')
         # TODO: 2) add option to save out the residuals of the regression (comes from auxil)
-        x = inDataset1.GetRasterBand(k).ReadAsArray(x10,y10,cols,rows).astype(float).ravel()
-        y = inDataset2.GetRasterBand(k).ReadAsArray(x20,y20,cols,rows).astype(float).ravel() 
+        x = inDataset1.GetRasterBand(k).ReadAsArray(x10,y10,cols,rows).astype(float).ravel()  # x=reference image
+        y = inDataset2.GetRasterBand(k).ReadAsArray(x20,y20,cols,rows).astype(float).ravel()  # y=target image
         b, a, R = auxil.orthoregress(y[trn], x[trn])  # trn is the vector of training points
         mean_tgt, mean_ref, mean_nrm = np.mean(y[tst]), np.mean(x[tst]), np.mean(a+b*y[tst])
         t_test = stats.ttest_rel(x[tst], a+b*y[tst])
         var_tgt, var_ref, var_nrm = np.var(y[tst]), np.var(x[tst]), np.var(a+b*y[tst])
         F_test = auxil.fv_test(x[tst], a+b*y[tst])
+        if save_residuals:
+            resid_k = x[idx] - (a+b*y[idx])  # taking residuals of both training and test datasets
+            # TODO: need to also write out the locations (i.e. spectral values) of these pixels, otherwise its meaningless
+            residuals.append(resid_k)
         print('--------------------')
         print('spectral band:      ', k)
         print('slope:              ', b)
@@ -177,8 +184,9 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
                     't_test':t_test, 'var_tgt':var_tgt, 'var_ref':var_ref, 'var_nrm':var_nrm, 'F_test':F_test}
         log.append(fit_info)
         outBand = outDataset.GetRasterBand(i)
-        outBand.WriteArray(np.resize(a+b*y,(rows,cols)),0,0) 
+        outBand.WriteArray(np.resize(a+b*y, (rows,cols)), 0, 0)
         outBand.FlushCache()
+        # TODO: this is a good place to write out an image of the invariant pixels!
         if i <= 10:
             plt.figure(i)    
             ymax = max(y[idx]) 
@@ -191,11 +199,40 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
             if view_plots:
                 plt.show()
         i += 1
+
+    # NL - save an image showing the invariant pixels
+    if img1_name.endswith("downsample.tif"):
+        invar_name = os.path.join(dir_target, img1_name[:-14] + "invariants.tif")
+    else:
+        invar_name = os.path.join(dir_target, img1_name[:-4] + "invariants.tif")
+    invariant_ds = driver.Create(invar_name, cols, rows, 1, GDT_Byte)
+    if geotransform is not None:
+        gt = list(geotransform)
+        gt[0] = gt[0] + x10*gt[1]
+        gt[3] = gt[3] + y10*gt[5]
+        invariant_ds.SetGeoTransform(tuple(gt))
+    if projection is not None:
+        invariant_ds.SetProjection(projection)
+    invar_band = np.zeros(rows*cols)
+    invar_band[idx] = 1
+    invar_band = np.resize(invar_band, (rows, cols))
+    invariant_ds.GetRasterBand(1).WriteArray(invar_band)
+    invariant_ds.FlushCache()
+
+
     # write out a log with radcal fit information
     if img1_name.endswith("downsample.tif"):
         log_outpath = os.path.join(dir_target, img1_name[:-14] + "radcal_parameters.json")
+        # write out an array with all the residuals
+        if save_residuals:
+            residuals.insert(0, y[idx])  # first row is the positions
+            np.savetxt(img1_name[:-14] + "residuals.csv", np.array(residuals), delimiter=',')
     else:
         log_outpath = os.path.join(dir_target, img1_name[:-4] + 'radcal_parameters.json')
+        # write out an array with all the residuals
+        if save_residuals:
+            residuals.insert(0, y[idx])  # first row is the positions
+            np.savetxt(img1_name[:-4] + "residuals.csv", np.array(residuals), delimiter=',')
     with open(log_outpath, "w") as write_file:
         json.dump(log, write_file)
 

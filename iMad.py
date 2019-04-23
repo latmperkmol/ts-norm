@@ -27,7 +27,7 @@ from osgeo.gdalconst import GA_ReadOnly, GDT_UInt16, GDT_Int16, GDT_Float32, GDT
 import os, sys, time
 
 def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,4], penalty=0.0,
-            datatype_out=GDT_UInt16):
+            datatype_out=GDT_UInt16, outdir=None):
     """
     Tweaked version of iMad which eschews GUI.
     General requirements still required. Input images must have same spatial and spectral dimensions.
@@ -83,7 +83,11 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
     if lam is None:
         return
 #  outfile
-    outfile, fmt = os.path.split(image1)[0] + "\\" + outfile_name, "GTiff"
+    if outdir:
+        dir_target = outdir
+    else:
+        dir_target = os.path.split(image1)[0]
+    outfile, fmt = os.path.join(dir_target, outfile_name), "GTiff"
     if not outfile:
         return
 #  match dimensions
@@ -189,7 +193,7 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
         itr += 1
 # write results to disk
     driver = gdal.GetDriverByName(fmt)
-    outDataset = driver.Create(outfile,cols,rows,bands+1, datatype_out)
+    outDataset = driver.Create(outfile, cols, rows, bands+1, datatype_out)
     projection = inDataset1.GetProjection()
     geotransform = inDataset1.GetGeoTransform()
     if geotransform is not None:
@@ -207,7 +211,7 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
             tile[:,k] = rasterBands1[k].ReadAsArray(x10,y10+row,cols,1)
             tile[:,bands+k] = rasterBands2[k].ReadAsArray(x20,y20+row,cols,1)
         mads = np.asarray((tile[:,0:bands]-means1)*A - (tile[:,bands::]-means2)*B)  # MADs
-        chisqr = np.sum((mads/sigMADs)**2,axis=1)
+        chisqr = np.sum((mads/sigMADs)**2,axis=1)  # under no-change hypothesis, this sum is approx. chi2 distributed
         for k in range(bands):
             outBands[k].WriteArray(np.reshape(mads[:,k],(1,cols)),0,row)
         outBands[bands].WriteArray(np.reshape(chisqr,(1,cols)),0,row)       # output: first outbands are MADs for corresponding bands. Final "band" is the chisquared image.
