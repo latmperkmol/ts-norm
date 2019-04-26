@@ -26,7 +26,8 @@ import matplotlib.pyplot as plt
 import json
  
 def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_pos1=[1,2,3,4], band_pos2=[1,2,3,4],
-               nochange_thresh=0.95, view_plots=True, datatype_out=GDT_UInt16, outdir=None):
+               nochange_thresh=0.95, view_plots=True, save_invariant=True, save_residuals=True,
+               datatype_out=GDT_UInt16, outdir=None):
     """
 
     :param image1: Image which will receive radiometric calibration (target image). Include path.
@@ -41,8 +42,6 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     :param datatype_out: GDT datatype to save radcal file
     :return:
     """
-    save_residuals = True  # TODO: make this an optional argument
-    save_invariant = True
 
     gdal.AllRegister()
     path, img1_name = os.path.split(image1)
@@ -88,7 +87,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         sys.stderr.write("Size mismatch")
         sys.exit(1)             
 #  iMAD image     
-    file3 = iMAD_img  # TODO: figure out correct path handling here
+    file3 = iMAD_img
     if not os.path.exists(file3):
         file3 = os.path.join(outdir, os.path.split(iMAD_img)[1])
         if not os.path.exists(file3):
@@ -156,8 +155,6 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     log = []
     residuals = []  # list to save residuals
     for k in pos1:
-        # TODO: 1) add option to save out the location of invariant pixels ('idx')
-        # TODO: 2) add option to save out the residuals of the regression (comes from auxil)
         x = inDataset1.GetRasterBand(k).ReadAsArray(x10,y10,cols,rows).astype(float).ravel()  # x=reference image
         y = inDataset2.GetRasterBand(k).ReadAsArray(x20,y20,cols,rows).astype(float).ravel()  # y=target image
         b, a, R = auxil.orthoregress(y[trn], x[trn])  # trn is the vector of training points
@@ -167,7 +164,6 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         F_test = auxil.fv_test(x[tst], a+b*y[tst])
         if save_residuals:
             resid_k = x[idx] - (a+b*y[idx])  # taking residuals of both training and test datasets
-            # TODO: need to also write out the locations (i.e. spectral values) of these pixels, otherwise its meaningless
             residuals.append(resid_k)
         print('--------------------')
         print('spectral band:      ', k)
@@ -186,7 +182,6 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         outBand = outDataset.GetRasterBand(i)
         outBand.WriteArray(np.resize(a+b*y, (rows,cols)), 0, 0)
         outBand.FlushCache()
-        # TODO: this is a good place to write out an image of the invariant pixels!
         if i <= 10:
             plt.figure(i)    
             ymax = max(y[idx]) 
@@ -201,24 +196,24 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         i += 1
 
     # NL - save an image showing the invariant pixels
-    if img1_name.endswith("downsample.tif"):
-        invar_name = os.path.join(dir_target, img1_name[:-14] + "invariants.tif")
-    else:
-        invar_name = os.path.join(dir_target, img1_name[:-4] + "invariants.tif")
-    invariant_ds = driver.Create(invar_name, cols, rows, 1, GDT_Byte)
-    if geotransform is not None:
-        gt = list(geotransform)
-        gt[0] = gt[0] + x10*gt[1]
-        gt[3] = gt[3] + y10*gt[5]
-        invariant_ds.SetGeoTransform(tuple(gt))
-    if projection is not None:
-        invariant_ds.SetProjection(projection)
-    invar_band = np.zeros(rows*cols)
-    invar_band[idx] = 1
-    invar_band = np.resize(invar_band, (rows, cols))
-    invariant_ds.GetRasterBand(1).WriteArray(invar_band)
-    invariant_ds.FlushCache()
-
+    if save_invariant:
+        if img1_name.endswith("downsample.tif"):
+            invar_name = os.path.join(dir_target, img1_name[:-14] + "invariants.tif")
+        else:
+            invar_name = os.path.join(dir_target, img1_name[:-4] + "invariants.tif")
+        invariant_ds = driver.Create(invar_name, cols, rows, 1, GDT_Byte)
+        if geotransform is not None:
+            gt = list(geotransform)
+            gt[0] = gt[0] + x10*gt[1]
+            gt[3] = gt[3] + y10*gt[5]
+            invariant_ds.SetGeoTransform(tuple(gt))
+        if projection is not None:
+            invariant_ds.SetProjection(projection)
+        invar_band = np.zeros(rows*cols)
+        invar_band[idx] = 1
+        invar_band = np.resize(invar_band, (rows, cols))
+        invariant_ds.GetRasterBand(1).WriteArray(invar_band)
+        invariant_ds.FlushCache()
 
     # write out a log with radcal fit information
     if img1_name.endswith("downsample.tif"):
