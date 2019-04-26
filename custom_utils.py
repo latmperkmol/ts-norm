@@ -154,7 +154,7 @@ def calc_VIs(rasterpath, nodataval=0.0):
     return ndvi_filled, evi_filled, img_src, cols, rows
 
 
-def vegetation_mask(ndvi, threshold=0.75):
+def vegetation_mask(ndvi, threshold=0.0):
     """
     Create a boolean array selecting all pixels with NDVI above a set a threshold
     :param ndvi: numpy masked array of the NDVI values
@@ -163,11 +163,11 @@ def vegetation_mask(ndvi, threshold=0.75):
     """
     print("Generating vegetation mask... ")
     rows, cols = ndvi.shape
-    empty = np.zeros([rows,cols])
+    empty = np.zeros([rows, cols])
     ones = empty+1
 
     # where ndvi >= threshold, veg_mask = True. Elsewhere, veg_mask = 0.
-    veg_mask = np.where(ndvi>=threshold, ones, empty)
+    veg_mask = np.where(ndvi >= threshold, ones, empty)
     # require that at least 10000 pixels are usable
     iteration = 0
     while np.sum(veg_mask) < 10000:
@@ -693,7 +693,7 @@ def diff_images(img1_path, img2_path, outfile=False):
 
 
 def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistration, view_radcal_fits, src_nodataval=0.0,
-         dst_nodataval=0.0, udm=None, outdir=None, datatype_out=gdal.GDT_UInt16):
+         dst_nodataval=0.0, udm=None, ndvi_thresh=0.0, nochange_thresh=0.95, outdir=None, datatype_out=gdal.GDT_UInt16):
     """
     Purpose: radiometrically calibrate a target image to a reference image.
     Optionally update the georeferencing in the target image.
@@ -802,7 +802,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     # Step 4: generate a veg mask at Planet resolution, downsample and apply, but save full res for later
     VI_calc_out_full_res = calc_VIs(image2_aligned, nodataval=dst_nodataval)
     ndvi_full_res = VI_calc_out_full_res[0]
-    veg_mask_full_res_arr = vegetation_mask(ndvi_full_res, threshold=0.0)
+    veg_mask_full_res_arr = vegetation_mask(ndvi_full_res, threshold=ndvi_thresh)
     if outdir:
         dir_veg_mask = outdir
     else:
@@ -844,9 +844,11 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     # image2_aligned is the full resolution Planet scene
     print("Beginning radcal...")
     normalized_fsoutfile = run_radcal(planet_img_novegmask, landsat_img_novegmask, outfile_RAD, outfile_MAD,
-                                      image2_aligned, view_plots=view_radcal_fits, outdir=outdir)
+                                      image2_aligned, view_plots=view_radcal_fits, outdir=outdir,
+                                      nochange_thresh=nochange_thresh)
     # Step 6: re-apply no-data values to the radiometrically corrected full-resolution planet image
     # necessary since radcal applies the correction to the no-data areas
+    # TODO add a projection-checking step to the UDM application.
     if udm:
         # Documentation on Planet UDM doesn't seem to agree with actual values:
         # https://assets.planet.com/docs/Planet_Combined_Imagery_Product_Specs_letter_screen.pdf
@@ -904,6 +906,10 @@ if __name__ == '__main__':
     else:
         print("Must choose y or n. Try again.")
         quit()
+    udms = input("Apply a usable data mask? Filepath if yes, otherwise n: ")
+    assert isinstance(udms, str)
+    if udms == "n":
+        udms = False
     allowRegistration = input("Allow target image to be re-registered if needed? y/n: ")
     assert isinstance(allowRegistration, str)
     if allowRegistration == "y":
@@ -922,4 +928,5 @@ if __name__ == '__main__':
     else:
         print("Must choose y or n. Try again.")
         quit()
-    main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, outdir=output_dir)
+    main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, udm=udms,
+         outdir=output_dir)
