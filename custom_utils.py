@@ -692,6 +692,40 @@ def diff_images(img1_path, img2_path, outfile=False):
     return "Diff image saved at " + outfile
 
 
+def projection_check(image_1, image_2, outdir=None):
+    """
+    Check if image1 and image2 are in the same spatial reference system.
+    If they are not, the SRS from image 1 is applied to image 2. The reprojected image is saved either in the folder
+    where image2 lives, or in outdir.
+    :param image_1: (str) path
+    :param image_2: (str) path
+    :param outdir: (str) optional output folder to save the reprojected image in.
+    :return:
+    """
+    image1_ds = gdal.Open(image_1)
+    image2_ds = gdal.Open(image_2)
+    image1_proj = image1_ds.GetProjection()
+    image2_proj = image2_ds.GetProjection()
+    image1_srs = osr.SpatialReference(wkt=image1_proj).GetAttrValue('authority', 1)
+    image2_srs = osr.SpatialReference(wkt=image2_proj).GetAttrValue('authority', 1)
+    image1_ds = None
+    image2_ds = None
+    if image1_srs == image2_srs:
+        print("Image projections are identical")
+        return image_2
+    else:
+        warnings.warn("Oh no! The projections are different! Attemping to fix that. ")
+        print("Assigning projection from " + os.path.split(image_1)[1] + " to " + os.path.split(image_2)[1])
+        if outdir:
+            dir_target = outdir
+        else:
+            dir_target = os.path.split(image_2)[0]
+        image2_reprojected = os.path.join(dir_target, os.path.split(image_2)[1][:-4] + "_reprojected.tif")
+        call('gdalwarp -t_srs EPSG:' + image1_srs + ' ' + image2_srs + ' ' + image2_reprojected)
+        print("reprojected image at " + image2_reprojected)
+        return image2_reprojected
+
+
 def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistration, view_radcal_fits, src_nodataval=0.0,
          dst_nodataval=0.0, udm=None, ndvi_thresh=0.0, nochange_thresh=0.95, outdir=None, datatype_out=gdal.GDT_UInt16):
     """
@@ -735,7 +769,6 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
         print("Not making an output directory. ")
 
     # Step 0.5: check to make sure all input images are in the same projection
-    # TODO: switch from gdal to rasterio to reduce image lock issues?
     rad_ref_DS = gdal.Open(image_ref)
     reg_ref_DS = gdal.Open(image_reg_ref)
     target_DS = gdal.Open(image_targ)
@@ -848,7 +881,6 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
                                       nochange_thresh=nochange_thresh)
     # Step 6: re-apply no-data values to the radiometrically corrected full-resolution planet image
     # necessary since radcal applies the correction to the no-data areas
-    # TODO add a projection-checking step to the UDM application.
     if udm:
         # Documentation on Planet UDM doesn't seem to agree with actual values:
         # https://assets.planet.com/docs/Planet_Combined_Imagery_Product_Specs_letter_screen.pdf
@@ -856,14 +888,18 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
             for raster in udm:
                 # expects each item in the list udm to be a file PATH, not just filename. Updates files in place.
                 process_udm(raster, src_nodata=1.0)
+            # TODO: save the merged UDM in the final output dir if specified
             merged_udm = os.path.join(os.path.split(udm[0])[0], "merged_udm.tif")
             udm_merger(udm, merged_udm)
+            # check if the merged UDM is in the same projection as the final image
+            merged_udm = projection_check(normalized_fsoutfile, merged_udm)
             udm_as_arr = img_to_array(merged_udm)
             final_images = set_no_data(udm_as_arr, normalized_fsoutfile, outfile_final, src_nodata=1.0,
                                        dst_nodata=dst_nodataval, save_mask=True)
         elif type(udm) == str:
             # assume that if we got a string, it is a single default UDM filepath that still must be processed.
             process_udm(udm, src_nodata=1.0)
+            udm = projection_check(normalized_fsoutfile, udm)
             udm_as_arr = img_to_array(udm)
             final_images = set_no_data(udm_as_arr, normalized_fsoutfile, outfile_final, src_nodata=1.0,
                                        dst_nodata=dst_nodataval, save_mask=True)
