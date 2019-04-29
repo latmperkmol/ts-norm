@@ -888,8 +888,10 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
             for raster in udm:
                 # expects each item in the list udm to be a file PATH, not just filename. Updates files in place.
                 process_udm(raster, src_nodata=1.0)
-            # TODO: save the merged UDM in the final output dir if specified
-            merged_udm = os.path.join(os.path.split(udm[0])[0], "merged_udm.tif")
+            if outdir:
+                merged_udm = os.path.join(outdir, "merged_udm.tif")
+            else:
+                merged_udm = os.path.join(os.path.split(udm[0])[0], "merged_udm.tif")
             udm_merger(udm, merged_udm)
             # check if the merged UDM is in the same projection as the final image
             merged_udm = projection_check(normalized_fsoutfile, merged_udm)
