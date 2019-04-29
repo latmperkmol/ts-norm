@@ -123,20 +123,22 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
 #      spectral tiling for statistics
         for row in range(rows):
             for k in range(bands):
-                tile[:,k] = rasterBands1[k].ReadAsArray(x10,y10+row,cols,1)         # NL: for each band, read as an array with dimensions of input images. First half of 'tile' has dimensions of first image.
-                tile[:,bands+k] = rasterBands2[k].ReadAsArray(x20,y20+row,cols,1)   # NL: second half of 'tile' has dimensions of second image
+                tile[:,k] = rasterBands1[k].ReadAsArray(x10,y10+row,cols,1)
+                tile[:,bands+k] = rasterBands2[k].ReadAsArray(x20,y20+row,cols,1)
 #          eliminate no-data pixels (assuming all zeroes)
-#           NL: seems to just be searching for no-data(0) pixels that exist in both images?? Note that this is repeated for each iteration, looping by row.
-            tst1 = np.sum(tile[:,0:bands],axis=1)       # NL: sum all values (by row) in 'tile' corresponding to first image?? return array w sum of rows. this is the least clear step to me.
-            tst2 = np.sum(tile[:,bands::],axis=1)       # NL: sum all values in 'tile' corresponding to second image??
-            idx1 = set(np.where(  (tst1>0)  )[0])       # NL: for all elements in tst1 that are >0, add their row number to set idx1?? Only need row numbers since we're iterating by row?
-            idx2 = set(np.where(  (tst2>0)  )[0])
-            idx = list(idx1.intersection(idx2))         # NL: create a list of all the rows where there are NOT no-data values in both images?? (not exactly right since tst is the sum of row locations)
+#           NL: find no-data(0) pixels that exist in both images
+            tst1 = np.sum(tile[:,0:bands],axis=1)      # NL: array w sum of rows in 'tile'
+            tst2 = np.sum(tile[:,bands::],axis=1)      # NL: array w sum of rows in 'tile' corresponding to second image
+            idx1 = set(np.where((tst1>0))[0])      # NL: index of first non-zero item in tst1
+            idx2 = set(np.where((tst2>0))[0])
+            # NL: create a list of all the rows where there are NOT no-data values in both images??
+            # (not exactly right since tst is the sum of row locations)
+            idx = list(idx1.intersection(idx2))
             if itr>0:
                 mads = np.asarray((tile[:,0:bands]-means1)*A - (tile[:,bands::]-means2)*B)
                 chisqr = np.sum((mads/sigMADs)**2,axis=1)
                 wts = 1-stats.chi2.cdf(chisqr,[bands])
-                cpm.update(tile[idx,:],wts[idx])    # NL: only update locations where both images have non-zero pixels (?)
+                cpm.update(tile[idx,:],wts[idx])    # NL: only update locations where both images have non-zero pixels
             else:
                 cpm.update(tile[idx,:])             # NL: leave no-data pixels as such (?)
 #     weighted covariance matrices and means
