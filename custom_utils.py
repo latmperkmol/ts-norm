@@ -706,7 +706,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     :param src_nodataval: (float) no-data value in the input images
     :param dst_nodataval: (float) no-data value to be applied to the output images
     :param udm: (list, tuple, or string) filepath of Unusable Data Mask(s) which will be applied to the final image
-    :param outdir: (str) folder to save all outputs. Not yet functional.
+    :param outdir: (str) folder to save all outputs.
     :param datatype_out: GDAL data type to save outputs, e.g. gdal.GDT_Float32. Not yet functional.
     :return: outpath_final: (str) path to final output image.
     """
