@@ -887,6 +887,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
 
 
 if __name__ == '__main__':
+    # TODO: use while statements to avoiding existing if user gets y/n statement wrong
     image1 = input("Location of image with reference radiometry: ")
     assert isinstance(image1, str)
     image_reg_ref = input("Location of image with desired georeferencing: ")
@@ -895,15 +896,6 @@ if __name__ == '__main__':
     assert isinstance(image_reg_ref, str)
     output_dir = input("Location of directory to save outputs? (will be created if does not exist): ")
     assert isinstance(output_dir, str)
-    allowDownsample = input("Allow target image to be downsampled if needed? y/n: ")
-    assert isinstance(allowDownsample, str)
-    if allowDownsample == "y":
-        allowDownsample = True
-    elif allowDownsample == "n":
-        allowDownsample = False
-    else:
-        print("Must choose y or n. Try again.")
-        quit()
     allowRegistration = input("Allow target image to be re-registered if needed? y/n: ")
     assert isinstance(allowRegistration, str)
     if allowRegistration == "y":
@@ -922,4 +914,5 @@ if __name__ == '__main__':
     else:
         print("Must choose y or n. Try again.")
         quit()
-    main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, outdir=output_dir)
+    main(image1, image_reg_ref, image2, allowDownsample=True, allowRegistration=allowRegistration,
+         view_radcal_fits=view_radcal_fits, outdir=output_dir)
