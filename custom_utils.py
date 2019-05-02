@@ -252,7 +252,7 @@ def register_image2(target_img, reference_img, no_data_val=0.0, outdir=None):
                                          nodata=(no_data_val, no_data_val), fmt_out="GTiff",
                                          projectDir=os.path.split(target_img)[0])
     tie_points = registered_img.CoRegPoints_table
-    coreg_csv_name = os.path.split(target_img)[1] + "coreg_points.csv"
+    coreg_csv_name = os.path.split(target_img)[1][:-4] + "coreg_points.csv"
     coreg_visual_name = os.path.split(target_img)[1] + "coreg_visual.png"
     tie_points.to_csv(os.path.join(direc, coreg_csv_name), sep=",", index=False)
     registered_img.view_CoRegPoints(savefigPath=os.path.join(direc, coreg_visual_name))
@@ -276,7 +276,7 @@ def trim_to_image(input_big, input_target, allow_downsample=True, outdir=None):
         third, filepath of the trimmed image
         fourth,
     """
-
+    # TODO: separate this into two functions: one to trim, one to downsample
     # open the big file, grab its resolution
     data_big = gdal.Open(input_big, GA_ReadOnly)
     geoTransform = data_big.GetGeoTransform()
@@ -307,7 +307,7 @@ def trim_to_image(input_big, input_target, allow_downsample=True, outdir=None):
     downsampled_target = None
     if allow_downsample:
         if (abs(xres_big) != abs(xres_target)) or (abs(yres_big) != abs(yres_target)):
-            print("Downsampling target image...")
+            print("Downsampling target image " + os.path.split(input_target)[1] + "...")
             # generate name for downsampled version of image
             if input_target.lower().endswith('tiff'):
                 downsampled_target = os.path.join(dir_target, os.path.split(input_target)[1][:-5] + "_downsample.tif")
@@ -318,29 +318,27 @@ def trim_to_image(input_big, input_target, allow_downsample=True, outdir=None):
                 print("Was expecting .tif or .tiff. Try again.")
                 quit()
             # perform downsampling
-            # TODO: swap this command to rasterio
-            """
             scale_factor_x = xres_big / xres_target  # will be a value larger than 1
             scale_factor_y = yres_big / yres_target
 
-            with rasterio.open(input_big) as ref_ds:
-                ref_transform = ref_ds.transform
-                target_transform = ref_transform * rasterio.Affine(ref_transform.a*scale_factor_x,
-                                                                   ref_transform.b, ref_transform.c,
-                                                                   ref_transform.d, ref_transform.d*scale_factor_y,
-                                                                   ref_transform.f)
-                ref_arr = ref_ds.read()
-                kwargs = ref_ds.meta
-                kwargs['transform'] = target_transform
-                with rasterio.open(downsampled_target, 'w', **kwargs) as dst:
-                    for i, band in enumerate(ref_arr, 1):
-                        dest = np.zeros_like(band)
-                        reproject(band, dest, src_transform=ref_transform, src_crs=ref_ds.crs,
-                                  dst_transform=target_transform, dst_crs=ref_ds.crs, resampling=Resampling.bilinear)
-                        dst.write(dest, indexes=i)
-            """
-            call('gdalwarp -tr ' + str(abs(xres_big)) + ' ' + str(abs(yres_big)) + ' -r average ' + input_target + ' '
-                 + downsampled_target, shell=True)
+            with rasterio.open(input_target) as target_ds:
+                target_transform = target_ds.transform
+                target_arr = target_ds.read()
+                kwargs = target_ds.meta
+                target_crs = target_ds.crs
+                new_transform = rasterio.Affine(target_transform.a*scale_factor_x,
+                                                target_transform.b, target_transform.c,
+                                                target_transform.d, target_transform.e*scale_factor_y,
+                                                target_transform.f)
+            kwargs['transform'] = target_transform
+            with rasterio.open(downsampled_target, 'w', **kwargs) as dst:
+                for i, band in enumerate(target_arr, 1):  # i -> 1,2,3,4;  target_arr is in the reference array
+                    dest = np.empty(shape=(round(band.shape[0]/scale_factor_x), round(band.shape[1]/scale_factor_y)),
+                                    dtype=band.dtype)
+                    reproject(band, dest, src_transform=target_transform, src_crs=target_crs,
+                              dst_transform=new_transform, dst_crs=target_crs, resampling=Resampling.bilinear)
+                    dst.write(dest, indexes=i)
+            del target_arr, dest, band
             # reset data, grab new extent
             data_target = gdal.Open(downsampled_target, GA_ReadOnly)
             geoTransform = data_target.GetGeoTransform()
@@ -357,9 +355,37 @@ def trim_to_image(input_big, input_target, allow_downsample=True, outdir=None):
         conductedDownsample = False
 
     print("Cropping...")
-    call('gdal_translate -projwin ' + ' '.join([str(x) for x in [minx, maxy, maxx, miny]]) + ' -a_nodata 0.0' +
-         ' -of GTiff ' + input_big + ' ' + outfile, shell=True)
+    call('rio clip ' + input_big + ' ' + outfile + ' --like ' + downsampled_target, shell=True)
     return conductedDownsample, downsampled_target, outfile, input_target
+
+
+def update_projection(src_image, dst_image, outfile="reprojected.tif", outdir=None):
+    """
+
+    :param src_image: Use the CRS from this image
+    :param dst_image: Update this image with the CRS from the other image
+    :param outfile: Save updated image with this name
+    :param outdir: Save image here. If not given, it will get saved in same place as dst_image
+    :return:
+    """
+    if outdir:
+        outfile = os.path.join(outdir, os.path.split(outfile)[1])
+    else:
+        outfile = os.path.join(os.path.split(dst_image)[0], os.path.split(outfile)[1])
+    with rasterio.open(src_image) as src_ds:
+        src_crs = src_ds.crs
+    with rasterio.open(dst_image, 'r') as dst_ds:
+        dst_crs = dst_ds.crs
+        dst_transform = dst_ds.transform
+        dst_arr = dst_ds.read()
+        kwargs = dst_ds.meta
+        with rasterio.open(outfile, 'w', **kwargs) as out_ds:
+            for i, band in enumerate(dst_arr, 1):
+                dest = np.zeros_like(dst_arr)
+                reproject(band, dest, src_crs=src_crs, dst_crs=dst_crs, src_transform=dst_transform,
+                          dst_transform=dst_transform)
+                out_ds.write(dest, indexes=1)
+    return
 
 
 def perform_downsample(src_image, target_res, outfile="downsample.tif"):
@@ -378,6 +404,40 @@ def perform_downsample(src_image, target_res, outfile="downsample.tif"):
     src_yres = geotransform[5]
     call('gdalwarp -tr ' + str(abs(target_res)) + ' ' + str(abs(target_res)) + ' -r average ' + src_image + ' '
          + outfile, shell=True)
+    return outfile
+
+
+def perform_downsample_rio(src_image, scale_factor_x, scale_factor_y, outfile=None, outdir=None):
+    """
+
+    :param src_image: filepath of image to downsample
+    :param scale_factor_x: scale to adjust image. <1 = downsample.(resolution of reference) / (resolution of target)
+    :param scale_factor_y: <1 = downsample. (resolution of reference) / (resolution of target)
+    :param outfile: filename
+    :param outdir: directory to save output image
+    :return:
+    """
+    if outdir:
+        outfile = os.path.join(outdir, os.path.split(outfile)[1])
+    else:
+        outfile = os.path.join(os.path.split(src_image)[0], os.path.split(outfile)[1])
+    with rasterio.open(src_image) as src_ds:
+        initial_transform = src_ds.transform
+        target_arr = src_ds.read()
+        kwargs = src_ds.meta
+        target_crs = src_ds.crs
+        new_transform = rasterio.Affine(initial_transform.a * scale_factor_x,
+                                        initial_transform.b, initial_transform.c,
+                                        initial_transform.d, initial_transform.e * scale_factor_y,
+                                        initial_transform.f)
+    kwargs['transform'] = initial_transform
+    with rasterio.open(outfile, 'w', **kwargs) as dst:
+        for i, band in enumerate(target_arr, 1):  # i -> 1,2,3,4;  target_arr is in the reference array
+            dest = np.empty(shape=(round(band.shape[0] / scale_factor_x), round(band.shape[1] / scale_factor_y)),
+                            dtype=band.dtype)
+            reproject(band, dest, src_transform=initial_transform, src_crs=target_crs,
+                      dst_transform=new_transform, dst_crs=target_crs, resampling=Resampling.bilinear)
+            dst.write(dest, indexes=i)
     return outfile
 
 
@@ -543,7 +603,6 @@ def scale_image(img_path, nodata, outdir=None, datatype_out=gdal.GDT_UInt16):
     bands = img_src.RasterCount
     count_thresh = 0.02
 
-    #bands_array = np.zeros([rows, cols, bands])    # maybe restore later
     bands_array = []
     nodata_array = np.zeros([rows, cols])    # will store locations where a pixel is no-data. If no-data, then 1.0.
     for band in range(bands):
@@ -735,7 +794,6 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
         print("Not making an output directory. ")
 
     # Step 0.5: check to make sure all input images are in the same projection
-    # TODO: switch from gdal to rasterio to reduce image lock issues?
     rad_ref_DS = gdal.Open(image_ref)
     reg_ref_DS = gdal.Open(image_reg_ref)
     target_DS = gdal.Open(image_targ)
@@ -752,13 +810,13 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
         print("Projection of the radiometric reference: " + str('EPSG:'+rad_ref_srs))
         print("Projection of the registration reference: " + str('EPSG:'+reg_ref_srs))
         print("Projection of the target image: " + str('EPSG:'+target_srs))
-        # TODO: rewrite these using rasterio?
         if rad_ref_srs != reg_ref_srs:
             if outdir:
                 dir_target = outdir
             else:
                 dir_target = os.path.split(image_reg_ref)[0]
             reproj_reg_ref = os.path.join(dir_target, "reg_ref_reprojected.tif")
+            # TODO: rewrite these using rasterio!!
             call('gdalwarp -t_srs EPSG:' + rad_ref_srs + ' ' + image_reg_ref + ' ' + reproj_reg_ref)
             image_reg_ref = reproj_reg_ref
         if rad_ref_srs != target_srs:
@@ -767,6 +825,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
             else:
                 dir_target = os.path.split(image_targ)[0]
             reproj_target = os.path.join(dir_target, image_targ[:-4] + "_reproj.tif")
+            # TODO: rewrite these using rasterio!!
             call('gdalwarp -overwrite -s_srs EPSG:' + target_srs + ' -t_srs EPSG:' + rad_ref_srs + ' ' + image_targ + ' '
                  + reproj_target)
             image_targ = reproj_target
@@ -791,7 +850,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     else:
         image2_aligned = image_targ  # keep in mind that this has a path attached
 
-    # Step 3: create a new Landsat snip to match aligned Planet image.
+    # Step 3: create a new snip of the radiometric reference image to match aligned the target image.
     trim_out = trim_to_image(image_ref, image2_aligned, allowDownsample, outdir=outdir)
     # note on next line: downsampled_img may or may not exist, depending if downsampling occurred.
     # trim_out[1:3] are all strings which include file location.
@@ -811,8 +870,11 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     array_to_img(veg_mask_full_res_arr, veg_mask_full_res_img, image2_aligned)
     # to make this a neat duplicate of the previous method, set_no_data expects veg mask to be an array, not a file
     # resolution in the following call assumes square pixels
-    veg_mask_downsamp = perform_downsample(veg_mask_full_res_img, res_ref_x,
-                                           outfile=os.path.join(dir_veg_mask, "veg_mask_downsample.tif"))
+    #veg_mask_downsamp = perform_downsample(veg_mask_full_res_img, res_ref_x,
+    #                                       outfile=os.path.join(dir_veg_mask, "veg_mask_downsample.tif"))
+    # untested!!
+    veg_mask_downsamp = perform_downsample_rio(veg_mask_full_res_img, res_ref_x/res_targ_x, res_ref_y/res_targ_y,
+                                               "veg_mask_downsample.tif", outdir=outdir)
     veg_mask_downsamp_arr = img_to_array(veg_mask_downsamp)
     planet_downsamp_vegmasked = set_no_data(veg_mask_downsamp_arr, downsampled_img, outfile="planet_with_veg_mask.tif",
                                             outdir=outdir, src_nodata=src_nodataval, dst_nodata=dst_nodataval)[1]
@@ -887,17 +949,23 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
 
 
 if __name__ == '__main__':
-    # TODO: use while statements to avoiding existing if user gets y/n statement wrong
     image1 = input("Location of image with reference radiometry: ")
     assert isinstance(image1, str)
     image_reg_ref = input("Location of image with desired georeferencing: ")
     assert isinstance(image_reg_ref, str)
-    image2 = input("Location of target image to be radiometrically normalized : ")
+    image2 = input("Location of target image to be radiometrically normalized: ")
     assert isinstance(image_reg_ref, str)
+    udm = input("Location of UDM to apply to target image? n for none: ")
+    assert isinstance(udm, str)
+    if udm == "n":
+        udm = None
     output_dir = input("Location of directory to save outputs? (will be created if does not exist): ")
     assert isinstance(output_dir, str)
     allowRegistration = input("Allow target image to be re-registered if needed? y/n: ")
     assert isinstance(allowRegistration, str)
+    while (allowRegistration != "y") and (allowRegistration != "n"):
+        allowRegistration = input("Try again. Allow re-registration? y/n: ")
+        assert isinstance(allowRegistration, str)
     if allowRegistration == "y":
         allowRegistration = True
     elif allowRegistration == "n":
@@ -907,6 +975,9 @@ if __name__ == '__main__':
         quit()
     view_radcal_fits = input("View radiometric calibration fit? y/n: ")
     assert isinstance(view_radcal_fits, str)
+    while (view_radcal_fits != "y") and (view_radcal_fits != "n"):
+        view_radcal_fits = input("Try again. Show radcal fits? y/n: ")
+        assert isinstance(view_radcal_fits, str)
     if view_radcal_fits == "y":
         view_radcal_fits = True
     elif view_radcal_fits == "n":
@@ -914,5 +985,5 @@ if __name__ == '__main__':
     else:
         print("Must choose y or n. Try again.")
         quit()
-    main(image1, image_reg_ref, image2, allowDownsample=True, allowRegistration=allowRegistration,
+    main(image1, image_reg_ref, image2, udm=udm, allowDownsample=True, allowRegistration=allowRegistration,
          view_radcal_fits=view_radcal_fits, outdir=output_dir)
