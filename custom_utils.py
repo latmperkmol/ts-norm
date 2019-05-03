@@ -815,7 +815,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
                 dir_target = outdir
             else:
                 dir_target = os.path.split(image_reg_ref)[0]
-            reproj_reg_ref = os.path.join(dir_target, "reg_ref_reprojected.tif")
+            reproj_reg_ref = os.path.join(dir_target, 'reg_ref_reprojected.tif')
             # TODO: rewrite these using rasterio!!
             call('gdalwarp -t_srs EPSG:' + rad_ref_srs + ' ' + image_reg_ref + ' ' + reproj_reg_ref)
             image_reg_ref = reproj_reg_ref
@@ -824,7 +824,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
                 dir_target = outdir
             else:
                 dir_target = os.path.split(image_targ)[0]
-            reproj_target = os.path.join(dir_target, image_targ[:-4] + "_reproj.tif")
+            reproj_target = os.path.join(dir_target, image_targ[:-4] + '_reproj.tif')
             # TODO: rewrite these using rasterio!!
             call('gdalwarp -overwrite -s_srs EPSG:' + target_srs + ' -t_srs EPSG:' + rad_ref_srs + ' ' + image_targ + ' '
                  + reproj_target)
