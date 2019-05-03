@@ -1002,22 +1002,6 @@ if __name__ == '__main__':
         udm = None
     output_dir = input("Location of directory to save outputs? (will be created if does not exist): ")
     assert isinstance(output_dir, str)
-<<<<<<< HEAD
-    allowDownsample = input("Allow target image to be downsampled if needed? y/n: ")
-    assert isinstance(allowDownsample, str)
-    if allowDownsample == "y":
-        allowDownsample = True
-    elif allowDownsample == "n":
-        allowDownsample = False
-    else:
-        print("Must choose y or n. Try again.")
-        quit()
-    udms = input("Apply a usable data mask? Filepath if yes, otherwise n: ")
-    assert isinstance(udms, str)
-    if udms == "n":
-        udms = False
-=======
->>>>>>> 67c924cd132181f167930ce79151df4aacfc5dea
     allowRegistration = input("Allow target image to be re-registered if needed? y/n: ")
     assert isinstance(allowRegistration, str)
     while (allowRegistration != "y") and (allowRegistration != "n"):
@@ -1042,10 +1026,5 @@ if __name__ == '__main__':
     else:
         print("Must choose y or n. Try again.")
         quit()
-<<<<<<< HEAD
-    main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, udm=udms,
-         outdir=output_dir)
-=======
     main(image1, image_reg_ref, image2, udm=udm, allowDownsample=True, allowRegistration=allowRegistration,
          view_radcal_fits=view_radcal_fits, outdir=output_dir)
->>>>>>> 67c924cd132181f167930ce79151df4aacfc5dea
