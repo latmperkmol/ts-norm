@@ -387,9 +387,10 @@ def update_projection(src_image, dst_image, outfile="reprojected.tif", outdir=No
                 reproject(band, dest, src_crs=src_crs, dst_crs=dst_crs, src_transform=dst_transform,
                           dst_transform=dst_transform)
                 out_ds.write(dest, indexes=1)
-    return
+    return outfile
 
 
+# THIS FUNCTION NO LONGER IN USE
 def perform_downsample(src_image, target_res, outfile="downsample.tif"):
     """
     Quick and dirty wrapper to call CL gdalwarp for downsampling
@@ -755,6 +756,7 @@ def diff_images(img1_path, img2_path, outfile=False):
     return "Diff image saved at " + outfile
 
 
+# TODO: swap this whole function to rasterio
 def projection_check(image_1, image_2, outdir=None):
     """
     Check if image1 and image2 are in the same spatial reference system.
@@ -783,10 +785,10 @@ def projection_check(image_1, image_2, outdir=None):
             dir_target = outdir
         else:
             dir_target = os.path.split(image_2)[0]
-        image2_reprojected = os.path.join(dir_target, os.path.split(image_2)[1][:-4] + "_reprojected.tif")
-        call('gdalwarp -t_srs EPSG:' + image1_srs + ' ' + image2_srs + ' ' + image2_reprojected)
-        print("reprojected image at " + image2_reprojected)
-        return image2_reprojected
+        image2_reprojected = image_2[:-4] + "_reprojected.tif"
+        update_projection(image1, image2, image2_reprojected, outdir=dir_target)
+        print("reprojected image at " + os.path.join(dir_target, image2_reprojected))
+        return os.path.join(dir_target, image2_reprojected)
 
 
 def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistration, view_radcal_fits, src_nodataval=0.0,
@@ -855,8 +857,8 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
             else:
                 dir_target = os.path.split(image_reg_ref)[0]
             reproj_reg_ref = os.path.join(dir_target, 'reg_ref_reprojected.tif')
-            # TODO: rewrite these using rasterio!!
-            call('gdalwarp -t_srs EPSG:' + rad_ref_srs + ' ' + image_reg_ref + ' ' + reproj_reg_ref)
+            update_projection(image_ref, image_reg_ref, 'reg_ref_reprojected.tif', outdir=dir_target)
+            # call('gdalwarp -t_srs EPSG:' + rad_ref_srs + ' ' + image_reg_ref + ' ' + reproj_reg_ref)
             image_reg_ref = reproj_reg_ref
         if rad_ref_srs != target_srs:
             if outdir:
@@ -864,9 +866,9 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
             else:
                 dir_target = os.path.split(image_targ)[0]
             reproj_target = os.path.join(dir_target, image_targ[:-4] + '_reproj.tif')
-            # TODO: rewrite these using rasterio!!
-            call('gdalwarp -overwrite -s_srs EPSG:' + target_srs + ' -t_srs EPSG:' + rad_ref_srs + ' ' + image_targ + ' '
-                 + reproj_target)
+            update_projection(image_ref, image_targ, image_targ[:-4] + '_reproj.tif', outdir=dir_target)
+            # call('gdalwarp -overwrite -s_srs EPSG:' + target_srs + ' -t_srs EPSG:' + rad_ref_srs + ' ' + image_targ + ' '
+            #     + reproj_target)
             image_targ = reproj_target
     # while the files are open, also grab resolution and number of bands
     bands_ref = rad_ref_DS.RasterCount
@@ -895,9 +897,12 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
         trim_out = trim_to_image(image_ref, image2_aligned, allowDownsample, outdir=outdir)
     else:
         # if the radiometric and geolocation references are the same image
-        # TODO: add handling in case outdir=None
+        if outdir:
+            dir_target = outdir
+        else:
+            dir_target = os.path.split(image_targ)[0]
         trim_out = (allowDownsample, image2_aligned,
-                    os.path.join(outdir, os.path.split(image_ref)[1][:-4] + "_trimmed.tif"),
+                    os.path.join(dir_target, os.path.split(image_ref)[1][:-4] + "_trimmed.tif"),
                     image2_aligned)
     # note on next line: downsampled_img may or may not exist, depending if downsampling occurred.
     # trim_out[1:3] are all strings which include file location.
