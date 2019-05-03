@@ -7,9 +7,8 @@ import future
 import past
 import six
 from builtins import input
+import sys
 import warnings
-warnings.filterwarnings("ignore", message="numpy.dtype size changed")
-warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 import json
 import rasterio
 from rasterio.warp import reproject, Resampling
@@ -23,6 +22,8 @@ import time
 import arosics
 from iMad import run_MAD
 from radcal import run_radcal
+warnings.filterwarnings("ignore", message="numpy.dtype size changed")
+warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
 
 def process_udm(udm_path, src_nodata=1.0):
@@ -330,7 +331,9 @@ def trim_to_image(input_big, input_target, allow_downsample=True, outdir=None):
                                                 target_transform.b, target_transform.c,
                                                 target_transform.d, target_transform.e*scale_factor_y,
                                                 target_transform.f)
-            kwargs['transform'] = target_transform
+            kwargs['transform'] = new_transform
+            kwargs['height'] = round(target_arr[0].shape[0]/scale_factor_x)
+            kwargs['width'] = round(target_arr[0].shape[1]/scale_factor_y)
             with rasterio.open(downsampled_target, 'w', **kwargs) as dst:
                 for i, band in enumerate(target_arr, 1):  # i -> 1,2,3,4;  target_arr is in the reference array
                     dest = np.empty(shape=(round(band.shape[0]/scale_factor_x), round(band.shape[1]/scale_factor_y)),
@@ -338,7 +341,6 @@ def trim_to_image(input_big, input_target, allow_downsample=True, outdir=None):
                     reproject(band, dest, src_transform=target_transform, src_crs=target_crs,
                               dst_transform=new_transform, dst_crs=target_crs, resampling=Resampling.bilinear)
                     dst.write(dest, indexes=i)
-            del target_arr, dest, band
             # reset data, grab new extent
             data_target = gdal.Open(downsampled_target, GA_ReadOnly)
             geoTransform = data_target.GetGeoTransform()
@@ -430,7 +432,9 @@ def perform_downsample_rio(src_image, scale_factor_x, scale_factor_y, outfile=No
                                         initial_transform.b, initial_transform.c,
                                         initial_transform.d, initial_transform.e * scale_factor_y,
                                         initial_transform.f)
-    kwargs['transform'] = initial_transform
+    kwargs['transform'] = new_transform
+    kwargs['height'] = round(target_arr[0].shape[0] / scale_factor_x)
+    kwargs['width'] = round(target_arr[0].shape[1] / scale_factor_y)
     with rasterio.open(outfile, 'w', **kwargs) as dst:
         for i, band in enumerate(target_arr, 1):  # i -> 1,2,3,4;  target_arr is in the reference array
             dest = np.empty(shape=(round(band.shape[0] / scale_factor_x), round(band.shape[1] / scale_factor_y)),
@@ -471,7 +475,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", outdir=None,  src_no
         bands = img_nodata_target.RasterCount
         if (cols != cols2) or (rows != rows2):
             print("size mismatch. use images with same dimensions.")
-            return
+            sys.exit()
 
         target_arr = np.zeros([rows, cols, bands])     # intializing. will become the output image
         target_arr = ma.masked_array(target_arr, fill_value=0.0)
@@ -530,7 +534,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", outdir=None,  src_no
 
         if (cols != cols2) or (rows != rows2):
             print("size mismatch. use images with same dimensions.")
-            return
+            sys.exit()
 
         planet_arr = np.zeros([rows, cols, bands])
         target_arr = np.zeros([rows, cols, bands])
@@ -803,6 +807,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     :param datatype_out: GDAL data type to save outputs, e.g. gdal.GDT_Float32. Not yet functional.
     :return: outpath_final: (str) path to final output image.
     """
+    # TODO: remove "allowDownsample" as an argument all together; just check the resolutions
     start = time.time()
     # Step 0: check image metadata to see if it has an acceptable level of cloud.
     image_targ_dir = os.path.split(image_targ)[0]
@@ -884,11 +889,21 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     else:
         image2_aligned = image_targ  # keep in mind that this has a path attached
 
+    # TODO: check generalizability for diff combinations of downsample, register, etc.
     # Step 3: create a new snip of the radiometric reference image to match aligned the target image.
-    trim_out = trim_to_image(image_ref, image2_aligned, allowDownsample, outdir=outdir)
+    if image_ref != image_reg_ref:
+        trim_out = trim_to_image(image_ref, image2_aligned, allowDownsample, outdir=outdir)
+    else:
+        # if the radiometric and geolocation references are the same image
+        # TODO: add handling in case outdir=None
+        trim_out = (allowDownsample, image2_aligned,
+                    os.path.join(outdir, os.path.split(image_ref)[1][:-4] + "_trimmed.tif"),
+                    image2_aligned)
     # note on next line: downsampled_img may or may not exist, depending if downsampling occurred.
     # trim_out[1:3] are all strings which include file location.
     downsampleFlag, downsampled_img, cropped_img, original_planet_img = trim_out  # downsampled_img has good alignment
+    downsampled_img = perform_downsample_rio(image_targ, res_ref_x/res_targ_x, res_ref_y/res_targ_y,
+                                             os.path.split(image_targ)[1][:-4] + "_downsampled.tif", outdir=outdir)
     if downsampleFlag == False:
         downsampled_img = original_planet_img
 
