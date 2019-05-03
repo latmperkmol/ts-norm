@@ -185,15 +185,15 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         outBand.WriteArray(np.resize(a+b*y, (rows,cols)), 0, 0)
         outBand.FlushCache()
         if i <= 10:
-            plt.figure(i)    
-            ymax = max(y[idx]) 
-            xmax = max(x[idx])      
-            plt.plot(y[idx],x[idx],'k.',[0,ymax],[a,a+b*ymax],'k-')
-            plt.axis([0,ymax,0,xmax])
-            plt.title('Band '+str(k))
-            plt.xlabel('Target')
-            plt.ylabel('Reference')
             if view_plots:
+                plt.figure(i)
+                ymax = max(y[idx])
+                xmax = max(x[idx])
+                plt.plot(y[idx],x[idx],'k.',[0,ymax],[a,a+b*ymax],'k-')
+                plt.axis([0,ymax,0,xmax])
+                plt.title('Band '+str(k))
+                plt.xlabel('Target')
+                plt.ylabel('Reference')
                 plt.show()
         i += 1
 
