@@ -740,7 +740,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     :param src_nodataval: (float) no-data value in the input images
     :param dst_nodataval: (float) no-data value to be applied to the output images
     :param udm: (list, tuple, or string) filepath of Unusable Data Mask(s) which will be applied to the final image
-    :param outdir: (str) folder to save all outputs. Not yet functional.
+    :param outdir: (str) folder to save all outputs.
     :param datatype_out: GDAL data type to save outputs, e.g. gdal.GDT_Float32. Not yet functional.
     :return: outpath_final: (str) path to final output image.
     """
@@ -927,6 +927,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
 
 
 if __name__ == '__main__':
+    # TODO: use while statements to avoiding existing if user gets y/n statement wrong
     image1 = input("Location of image with reference radiometry: ")
     assert isinstance(image1, str)
     image_reg_ref = input("Location of image with desired georeferencing: ")
@@ -935,6 +936,7 @@ if __name__ == '__main__':
     assert isinstance(image_reg_ref, str)
     output_dir = input("Location of directory to save outputs? (will be created if does not exist): ")
     assert isinstance(output_dir, str)
+<<<<<<< HEAD
     allowDownsample = input("Allow target image to be downsampled if needed? y/n: ")
     assert isinstance(allowDownsample, str)
     if allowDownsample == "y":
@@ -948,6 +950,8 @@ if __name__ == '__main__':
     assert isinstance(udms, str)
     if udms == "n":
         udms = False
+=======
+>>>>>>> a5a5fe8c4ec55a7f57bc85d807430fd2639e943c
     allowRegistration = input("Allow target image to be re-registered if needed? y/n: ")
     assert isinstance(allowRegistration, str)
     if allowRegistration == "y":
@@ -966,5 +970,10 @@ if __name__ == '__main__':
     else:
         print("Must choose y or n. Try again.")
         quit()
+<<<<<<< HEAD
     main(image1, image_reg_ref, image2, allowDownsample, allowRegistration, view_radcal_fits, udm=udms,
          outdir=output_dir)
+=======
+    main(image1, image_reg_ref, image2, allowDownsample=True, allowRegistration=allowRegistration,
+         view_radcal_fits=view_radcal_fits, outdir=output_dir)
+>>>>>>> a5a5fe8c4ec55a7f57bc85d807430fd2639e943c
