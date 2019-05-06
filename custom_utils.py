@@ -252,7 +252,8 @@ def register_image2(target_img, reference_img, no_data_val=0.0, outdir=None):
         return
     registered_img = arosics.COREG_LOCAL(reference_img, target_img, 300, path_out=warped_out,
                                          nodata=(no_data_val, no_data_val), fmt_out="GTiff",
-                                         projectDir=os.path.split(target_img)[0])
+                                         projectDir=os.path.split(target_img)[0],
+                                         r_b4match=4, s_b4match=4, calc_corners=False, align_grids=False)
     tie_points = registered_img.CoRegPoints_table
     coreg_csv_name = os.path.split(target_img)[1][:-4] + "coreg_points.csv"
     coreg_visual_name = os.path.split(target_img)[1] + "coreg_visual.png"
