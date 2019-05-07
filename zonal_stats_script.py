@@ -336,9 +336,9 @@ def compress_values(data_arr, spacing_arr=[], nodata=0.0):
     if len(spacing_arr) == len(data_arr):
         masked_spacing_arr = np.ma.array(spacing_arr, mask=masked_data_arr.mask)
         compressed_spacing_arr = masked_spacing_arr.compressed()
-        return compressed_data_arr, compressed_spacing_arr
+        return np.array(compressed_data_arr), np.array(compressed_spacing_arr)
     else:
-        return compressed_data_arr, spacing_arr
+        return np.array(compressed_data_arr), np.array(spacing_arr)
 
 
 if __name__ == '__main__':
