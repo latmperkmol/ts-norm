@@ -18,7 +18,6 @@
 #
 #    Modified by Nicholas Leach
 
-import auxil.auxil as auxil
 import sys, os, time
 import numpy as np 
 from scipy import stats
@@ -26,8 +25,10 @@ from osgeo import gdal
 from osgeo.gdalconst import GA_ReadOnly, GDT_Float32, GDT_Int32, GDT_UInt16, GDT_Byte
 import matplotlib.pyplot as plt
 import json
+import math
+from scipy.special import betainc
  
-def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_pos1=[1,2,3,4], band_pos2=[1,2,3,4],
+def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_pos1=(1,2,3,4), band_pos2=(1,2,3,4),
                nochange_thresh=0.95, view_plots=True, save_invariant=True, save_residuals=True,
                datatype_out=GDT_UInt16, outdir=None):
     """
@@ -159,11 +160,11 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     for k in pos1:
         x = inDataset1.GetRasterBand(k).ReadAsArray(x10,y10,cols,rows).astype(float).ravel()  # x=reference image
         y = inDataset2.GetRasterBand(k).ReadAsArray(x20,y20,cols,rows).astype(float).ravel()  # y=target image
-        b, a, R = auxil.orthoregress(y[trn], x[trn])  # trn is the vector of training points
+        b, a, R = orthoregress(y[trn], x[trn])  # trn is the vector of training points
         mean_tgt, mean_ref, mean_nrm = np.mean(y[tst]), np.mean(x[tst]), np.mean(a+b*y[tst])
         t_test = stats.ttest_rel(x[tst], a+b*y[tst])
         var_tgt, var_ref, var_nrm = np.var(y[tst]), np.var(x[tst]), np.var(a+b*y[tst])
-        F_test = auxil.fv_test(x[tst], a+b*y[tst])
+        F_test = fv_test(x[tst], a+b*y[tst])
         if save_residuals:
             resid_k = x[idx] - (a+b*y[idx])  # taking residuals of both training and test datasets
             residuals.append(resid_k)
@@ -269,3 +270,36 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         return fsoutfile
     else:
         return
+
+
+def orthoregress(x, y):
+    Xm = np.mean(x)
+    Ym = np.mean(y)
+    s = np.cov(x,y)
+    R = s[0, 1]/math.sqrt(s[1, 1]*s[0, 0])
+    lam, vs = np.linalg.eig(s)
+    idx = np.argsort(lam)
+    vs = vs[:, idx]      # increasing order, so
+    b = vs[1,1]/vs[0,1] # first pc is second column
+    return [b, Ym-b*Xm, R]
+
+
+def fv_test(x0, x1):
+    # taken from IDL library
+    nx0 = len(x0)
+    nx1 = len(x1)
+    v0 = np.var(x0)
+    v1 = np.var(x1)
+    if v0 > v1:
+        f = v0/v1
+        df0 = nx1-1
+        df1 = nx0-1
+    else:
+        f = v1/v0
+        df0 = nx1-1
+        df1 = nx0-1
+    prob = 2.0*betainc(0.5*df1, 0.5*df0, df1/(df1+df0*f))
+    if prob > 1:
+        return f, 2.0-prob
+    else:
+        return f, prob
