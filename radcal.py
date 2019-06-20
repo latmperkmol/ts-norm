@@ -157,6 +157,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     i = 1
     log = []
     residuals = []  # list to save residuals
+    predicted = []  # list to save predicted values at the invariant pixels
     for k in pos1:
         x = inDataset1.GetRasterBand(k).ReadAsArray(x10,y10,cols,rows).astype(float).ravel()  # x=reference image
         y = inDataset2.GetRasterBand(k).ReadAsArray(x20,y20,cols,rows).astype(float).ravel()  # y=target image
@@ -166,8 +167,12 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
         var_tgt, var_ref, var_nrm = np.var(y[tst]), np.var(x[tst]), np.var(a+b*y[tst])
         F_test = fv_test(x[tst], a+b*y[tst])
         if save_residuals:
-            resid_k = x[idx] - (a+b*y[idx])  # taking residuals of both training and test datasets
+            # need to write out the predicted value and the residual at that value
+            # need to do this for each band since the predicted value and residual will be different for each
+            predicted_k = a+b*y[idx]
+            resid_k = x[idx] - (a+b*y[idx])  # taking residuals of both training and test datasets for band k
             residuals.append(resid_k)
+            predicted.append(predicted_k)
         print('--------------------')
         print('spectral band:      ', k)
         print('slope:              ', b)
@@ -221,16 +226,18 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     # write out a log with radcal fit information
     if img1_name.endswith("downsample.tif"):
         log_outpath = os.path.join(dir_target, img1_name[:-14] + "radcal_parameters.json")
-        # write out an array with all the residuals
+        # write out an array with all the predicted invariant pixel values and their residuals
         if save_residuals:
-            residuals.insert(0, y[idx])  # first row is the positions
-            np.savetxt(img1_name[:-14] + "residuals.csv", np.array(residuals), delimiter=',')
+            resid_file_contents = predicted + residuals  # first rows are the predicted pixel values
+            np.savetxt(img1_name[:-14] + "residuals.csv", np.array(resid_file_contents), delimiter=',',
+                       header="1st half of rows are the predicted values. 2nd half are residuals.")
     else:
         log_outpath = os.path.join(dir_target, img1_name[:-4] + 'radcal_parameters.json')
         # write out an array with all the residuals
         if save_residuals:
-            residuals.insert(0, y[idx])  # first row is the positions
-            np.savetxt(img1_name[:-4] + "residuals.csv", np.array(residuals), delimiter=',')
+            resid_file_contents = predicted + residuals  # first rows are the predicted pixel values
+            np.savetxt(img1_name[:-4] + "residuals.csv", np.array(resid_file_contents), delimiter=',',
+                       header="1st half of rows are the predicted values. 2nd half are residuals.")
     with open(log_outpath, "w") as write_file:
         json.dump(log, write_file)
 

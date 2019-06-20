@@ -867,7 +867,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
         # need to also make a downsampled version of the target image
         if different_resolutions:
             downsampled_img = perform_downsample_rio(image_targ, res_ref_x / res_targ_x, res_ref_y / res_targ_y,
-                                                     os.path.split(image_targ)[1][:-4] + "_downsampled.tif",
+                                                     os.path.split(image_targ)[1][:-4] + "_downsample.tif",
                                                      outdir=outdir)
 
     # note on next line: downsampled_img may or may not exist, depending if downsampling occurred.
@@ -875,7 +875,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     # TODO: sort out these next to lines
     downsampleFlag, downsampled_img, cropped_img, original_planet_img = trim_out  # downsampled_img has good alignment
     downsampled_img = perform_downsample_rio(image_targ, res_ref_x/res_targ_x, res_ref_y/res_targ_y,
-                                             os.path.split(image_targ)[1][:-4] + "_downsampled.tif", outdir=outdir)
+                                             os.path.split(image_targ)[1][:-4] + "_downsample.tif", outdir=outdir)
     if downsampleFlag == False:
         downsampled_img = original_planet_img
 
