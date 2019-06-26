@@ -19,7 +19,6 @@
 #
 #    Modified by Nicholas Leach
 
-import auxil.auxil as auxil
 import numpy as np
 from scipy import linalg, stats
 from osgeo import gdal
@@ -122,7 +121,7 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
     print('time2: '+file2)
     print('Delta    [canonical correlations]')
 #  iteration of MAD
-    cpm = auxil.Cpm(2*bands)
+    cpm = Cpm(2*bands)
     delta = 1.0
     oldrho = np.zeros(bands)
     itr = 0
@@ -158,9 +157,9 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
                 mads = np.asarray((tile[:,0:bands]-means1)*A - (tile[:,bands::]-means2)*B)
                 chisqr = np.sum((mads/sigMADs)**2,axis=1)
                 wts = 1-stats.chi2.cdf(chisqr,[bands])
-                cpm.update(tile[idx, :], wts[idx])    # NL: update means and covariance using no-data values??
+                cpm.update2(tile[idx, :], wts[idx])    # NL: update means and covariance using no-data values??
             else:
-                cpm.update(tile[idx, :])
+                cpm.update2(tile[idx, :])
 #     weighted covariance matrices and means
         S = cpm.covariance()
         means = cpm.means()
@@ -178,8 +177,8 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
         b2 = s22
 #     solution of generalized eigenproblems
         if bands>1:
-            mu2a,A = auxil.geneiv(c1,b1)
-            mu2b,B = auxil.geneiv(c2,b2)
+            mu2a,A = geneiv(c1,b1)
+            mu2b,B = geneiv(c2,b2)
 #          sort a
             idx = np.argsort(mu2a)
             A = A[:,idx]
@@ -256,27 +255,17 @@ class Cpm(object):
         self.sw = 0.0000001
 
     def update(self, Xs, Ws=None):
-        n, N = np.shape(Xs)
-        if Ws is None:
-            Ws = np.ones(n)
-        sw = ctypes.c_double(self.sw)
-        mn = self.mn
-        cov = self.cov
-        provmeans(Xs, Ws, N, n, ctypes.byref(sw), mn, cov)  # byref passes sw as a pointer
-        self.sw = sw.value  # dereferences sw and overwrites the pointer sw with the value
-        self.mn = mn  # replaces initially empty 'mn' array with calculated means
-        self.cov = cov  # replaces empty cov with covariance matrix
-
-    def update2(self, Xs, Ws=None):
         # testing a version of update that eschews the provisional means dll
         # it will be less efficient but easier to troubleshoot and implement
+        # reference Nick Leach's python implementation provisional_means
         n, N = np.shape(Xs)
         if Ws is None:
             Ws = np.ones(n)
         sw = self.sw
         mn = self.mn
         cov = self.cov
-        sw, mn, cov = provisional_means(Xs, Ws, sw, mn, cov)
+        n, N = np.shape(Xs)
+        sw, mn, cov = provisional_means(Xs, Ws, N, n, sw, mn, cov)
         self.sw = sw
         self.mn = mn
         self.cov = cov
@@ -317,28 +306,34 @@ def geneiv(A,B):
     return eivs, Li.transpose()*V
 
 
-def provisional_means(Xs, Ws, sw, mn, cov):
+def provisional_means(Xs, Ws, NN, n, sw, mn, cov):
     """
     Provisional means algorithm, adapted from C++ code written by Mort Canty
+    In original script, Xs is pointer, Ws is pointer, NN is int, n is int, sw is double, mn is pointer, cov is pointer.
+    Written by Nick Leach
     :param Xs: (numpy array) input array with data values. Must be 1D??
     :param Ws: (numpy array) weights of the input values??
+    :param NN: (int) columns of Xs
+    :param n: (int) rows of Xs
     :param sw: (float, I think) offset parameter or something. Probably stands for "sum of the weights"
     :param mn: (numpy array) empty 1D numpy array with length N. Will store means.
     :param cov: (numpy array) empty 2D numpy array with dimensions n, N
     :return:
     """
-    n, N = np.shape(Xs)
-    d = np.zeros(n*N)  # empty array
+    d = np.zeros(n*NN)  # empty array
+    Xs = Xs.flatten()
+    cov_shape = cov.shape
     for i in range(0, n):
-        w = Ws[i]  # equivalent to dereferencing the Ws array in C++
+        w = Ws[i]  # equivalent to dereferencing the Ws array in C
         sw += Ws[i]  # sw = sw+Ws (essentially adding a small offset to Ws the first time. sw may change later)
         r = w/sw  # r is the ith weight divided by the sum of the weights
         # update the means mn
-        for j in range(0, N):
-            d[j] = Xs[i*N][j] - mn[j]  # TODO not clear if this line is correct
+        for j in range(0, NN):
+            d[j] = Xs[i*NN+j] - mn[j]
             mn[j] += d[j]*r
         # update the covariance cov
-        for j in range(0, N):
-            for k in range(j, N):
-                cov[j*N, k] += d[j]*d[k]*(1-r)*w
+        for j in range(0, NN):
+            for k in range(j, NN):
+                cov = cov.flatten()
+                cov[j*NN+k] += d[j]*d[k]*(1-r)*w
     return sw, mn, cov
