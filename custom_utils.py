@@ -3,22 +3,26 @@
 # >> python custom_utils.py
 # Will prompt for names and file locations of images.
 
-import future
-import past
+
 import six
 from builtins import input
-import sys
 import warnings
 import json
 import math
-import rasterio
 from rasterio.warp import reproject, Resampling
 import numpy as np
 import numpy.ma as ma
 import gdal, osr
+import os
+import rasterio
+import rasterio.mask
+import rasterio.features
+import fiona
+from geopandas import GeoDataFrame
+import pandas as pd
+from shapely.geometry import shape
 from gdalconst import GA_ReadOnly
 from subprocess import call
-import os
 import time
 import arosics
 from iMad import run_MAD
@@ -205,15 +209,15 @@ def calc_img_stats(img_tif):
     return stats
 
 
-def check_for_clouds(dir=".", tolerance=0.5):
+def check_for_clouds(directory=".", tolerance=0.5):
     """
     Check the metadata file for the input image to see if it good enough to run through iMad.
 
-    :param dir: (string) directory containing JSON files with image metadata
+    :param directory: (string) directory containing JSON files with image metadata
     :return: usable: (boolean) True for a usable image, False otherwise.
     """
     cloud = []
-    for dirpath, dirnames, filenames in os.walk(dir):
+    for dirpath, dirnames, filenames in os.walk(directory):
         for filename in [f for f in filenames if f.endswith("metadata.json")]:
             with open(os.path.join(dirpath, filename)) as file:
                 metadata = json.load(file)
@@ -363,6 +367,76 @@ def trim_to_image(input_big, input_target, allow_downsample=True, outdir=None):
     return conductedDownsample, downsampled_target, outfile, input_target
 
 
+def clip_to_shapefile(raster, shapefile, force_dims=None, outname="clipped_raster.tif", outdir=None):
+    """
+    Clip the input raster to the given shapefile.
+
+    :param raster: (str) path to raster to clip
+    :param shapefile: (str) path to shapefile with features to use for clipping
+    :param force_dims: (tuple) height, width to enforce on the output image. Unstable.
+    :param outname: (str) name of the output raster
+    :param outdir: (str) if given, save the output this folder
+    :return:
+    """
+    if outdir:
+        # if outdir is specified, save the clipped raster there
+        outpath = os.path.join(outdir, outname)
+    else:
+        # otherwise, save to the same folder as the input raster
+        outpath = os.path.join(os.path.split(raster)[0], outname)
+    # load in the features from shapefile
+    with fiona.open(shapefile, 'r') as src:
+        features = [feature['geometry'] for feature in src]
+    # create clipped raster data and transform
+    with rasterio.open(raster, 'r') as src:
+        out_image, out_transform = rasterio.mask.mask(src, features, crop=True)
+        out_meta = src.meta.copy()
+    # update metadata with new height, width, and transform
+    if force_dims:
+        out_meta.update({"height": force_dims[0], "width": force_dims[1], "transform": out_transform})
+        # save to outpath
+        with rasterio.open(outpath, 'w', **out_meta) as dst:
+            dst.write(out_image[:, :force_dims[0], :force_dims[1]])
+    else:
+        out_meta.update({"height": out_image.shape[1], "width": out_image.shape[2], "transform": out_transform})
+        # save to outpath
+        with rasterio.open(outpath, 'w', **out_meta) as dst:
+            dst.write(out_image)
+    return outpath
+
+
+def make_shapefile_from_raster(raster, outname="vectorized.shp", outdir=None):
+    """
+    Generate a shapefile with a single feature outlining the extent of the input raster.
+    There is probably a better way to do this, but this works...
+
+    :param raster: (str) path to raster to vectorize
+    :param outname: (str) name of the generated shapefile
+    :param outdir: (str) if given, save the output to this folder
+    :return:
+    """
+    if outdir:
+        # if outdir is specified, save the clipped raster there
+        outpath = os.path.join(outdir, outname)
+    else:
+        # otherwise, save to the same folder as the input raster
+        outpath = os.path.join(os.path.split(raster)[0], outname)
+    d = dict()
+    d['val'] = []
+    geometry = []
+    with rasterio.open(raster, 'r') as src:
+        empty = np.zeros_like(src.read(1))
+        for shp, val in rasterio.features.shapes(source=empty, transform=src.transform):
+            d['val'].append(val)
+            geometry.append(shape(shp))
+        raster_crs = src.crs
+    df = pd.DataFrame(data=d)
+    geo_df = GeoDataFrame(df, crs={'init': raster_crs['init']}, geometry=geometry)
+    geo_df['area'] = geo_df.area
+    geo_df.to_file(outpath, driver="ESRI Shapefile")
+    return outpath
+
+
 def update_projection(src_image, dst_image, outfile="reprojected.tif", outdir=None):
     """
 
@@ -385,30 +459,10 @@ def update_projection(src_image, dst_image, outfile="reprojected.tif", outdir=No
         kwargs = dst_ds.meta
         with rasterio.open(outfile, 'w', **kwargs) as out_ds:
             for i, band in enumerate(dst_arr, 1):
-                dest = np.zeros_like(dst_arr)
+                dest = np.zeros_like(dst_arr[0])
                 reproject(band, dest, src_crs=src_crs, dst_crs=dst_crs, src_transform=dst_transform,
                           dst_transform=dst_transform)
-                out_ds.write(dest, indexes=1)
-    return outfile
-
-
-# THIS FUNCTION NO LONGER IN USE
-def perform_downsample(src_image, target_res, outfile="downsample.tif"):
-    """
-    Quick and dirty wrapper to call CL gdalwarp for downsampling
-    :param src_image:
-    :param target_res:
-    :param outfile:
-    :return:
-    """
-    # TODO: change this whole function to rasterio
-    # open source image, grab resolution
-    src_DS = gdal.Open(src_image, GA_ReadOnly)
-    geotransform = src_DS.GetGeoTransform()
-    src_xres = geotransform[1]
-    src_yres = geotransform[5]
-    call('gdalwarp -tr ' + str(abs(target_res)) + ' ' + str(abs(target_res)) + ' -r average ' + src_image + ' '
-         + outfile, shell=True)
+                out_ds.write(dest, i)
     return outfile
 
 
@@ -478,8 +532,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", outdir=None, src_nod
         rows2 = img_nodata_target.RasterYSize
         bands = img_nodata_target.RasterCount
         if (cols != cols2) or (rows != rows2):
-            print("size mismatch. use images with same dimensions.")
-            #sys.exit()
+            warnings.warn("size mismatch. use images with same dimensions.")
 
         rows = int(np.min((rows, rows2)))
         cols = int(np.min((cols, cols2)))
@@ -558,7 +611,7 @@ def set_no_data(planet_img, cropped_img, outfile="out.tif", outdir=None, src_nod
 
         print("Building no-data array...")
         for band in range(bands):
-            planet_arr[:, :, band] = np.array(planet.GetRasterBand(band+1).ReadAsArray())
+            planet_arr[:, :, band] = np.array(planet.GetRasterBand(band+1).ReadAsArray())[:rows, :cols]
             no_data_mask[:, :, band] = planet_arr[:, :, band] == src_nodata
             # Pixels with data marked as 0.0. Pixels with no data marked as 1.0. Could flip this by using: planet_arr[:,:,band] != src_nodata
             # TODO flip this so that it makes more sense...
@@ -740,7 +793,7 @@ def projection_check(image_1, image_2, outdir=None):
         else:
             dir_target = os.path.split(image_2)[0]
         image2_reprojected = image_2[:-4] + "_reprojected.tif"
-        update_projection(image1, image2, image2_reprojected, outdir=dir_target)
+        update_projection(image_1, image_2, image2_reprojected, outdir=dir_target)
         print("reprojected image at " + os.path.join(dir_target, image2_reprojected))
         return os.path.join(dir_target, image2_reprojected)
 
@@ -812,17 +865,14 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
                 dir_target = os.path.split(image_reg_ref)[0]
             reproj_reg_ref = os.path.join(dir_target, 'reg_ref_reprojected.tif')
             update_projection(image_ref, image_reg_ref, 'reg_ref_reprojected.tif', outdir=dir_target)
-            # call('gdalwarp -t_srs EPSG:' + rad_ref_srs + ' ' + image_reg_ref + ' ' + reproj_reg_ref)
             image_reg_ref = reproj_reg_ref
         if rad_ref_srs != target_srs:
             if outdir:
                 dir_target = outdir
             else:
                 dir_target = os.path.split(image_targ)[0]
-            reproj_target = os.path.join(dir_target, image_targ[:-4] + '_reproj.tif')
-            update_projection(image_ref, image_targ, image_targ[:-4] + '_reproj.tif', outdir=dir_target)
-            # call('gdalwarp -overwrite -s_srs EPSG:' + target_srs + ' -t_srs EPSG:' + rad_ref_srs + ' ' + image_targ + ' '
-            #     + reproj_target)
+            reproj_target = os.path.join(dir_target, os.path.split(image_targ)[1][:-4] + '_reproj.tif')
+            update_projection(image_ref, image_targ, reproj_target, outdir=dir_target)
             image_targ = reproj_target
     # while the files are open, also grab resolution and number of bands
     bands_ref = rad_ref_DS.RasterCount
@@ -879,6 +929,23 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     if downsampleFlag == False:
         downsampled_img = original_planet_img
 
+    # Step 3.5: check if the radiometric reference image snip is actually smaller than the target image.
+    # if so, trim the target image down to the size of the reference image snip.
+    with rasterio.open(cropped_img, 'r') as src:
+        cropped_dimensions = (src.height, src.width)
+    with rasterio.open(downsampled_img, 'r') as src:
+        downsampled_dimensions = (src.height, src.width)
+    if (cropped_dimensions[0] < downsampled_dimensions[0]) or (cropped_dimensions[1] < downsampled_dimensions[1]):
+        warnings.warn("Part of the target image's spatial extent falls outside the reference image. Clipping.")
+        shapefile_name = "rad_ref_extent.shp"
+        clipped_downsampled_target_name = downsampled_img[:-4] + "_clip.tif"
+        clipped_fullres_target_name = image2_aligned[:-4] + "_clip.tif"
+        shapefile_path = make_shapefile_from_raster(cropped_img, shapefile_name, outdir=outdir)
+        downsampled_img = clip_to_shapefile(downsampled_img, shapefile_path, force_dims=cropped_dimensions,
+                                            outname=clipped_downsampled_target_name, outdir=outdir)
+        image2_aligned = clip_to_shapefile(image2_aligned, shapefile_path,
+                                           outname=clipped_fullres_target_name, outdir=outdir)
+
     # Step 4: generate a veg mask at Planet resolution, downsample and apply, but save full res for later
     VI_calc_out_full_res = calc_VIs(image2_aligned, nodataval=dst_nodataval)
     ndvi_full_res = VI_calc_out_full_res[0]
@@ -891,9 +958,6 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     array_to_img(veg_mask_full_res_arr, veg_mask_full_res_img, image2_aligned)
     # to make this a neat duplicate of the previous method, set_no_data expects veg mask to be an array, not a file
     # resolution in the following call assumes square pixels
-    #veg_mask_downsamp = perform_downsample(veg_mask_full_res_img, res_ref_x,
-    #                                       outfile=os.path.join(dir_veg_mask, "veg_mask_downsample.tif"))
-    # untested!!
     veg_mask_downsamp = perform_downsample_rio(veg_mask_full_res_img, res_ref_x/res_targ_x, res_ref_y/res_targ_y,
                                                "veg_mask_downsample.tif", outdir=outdir)
     veg_mask_downsamp_arr = img_to_array(veg_mask_downsamp)
