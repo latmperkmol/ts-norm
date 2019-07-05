@@ -17,7 +17,7 @@
 #    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #    GNU General Public License for more details.
 #
-#    Modified by Nicholas Leach
+#    Modified by Nicholas Leach, 2019
 
 import numpy as np
 from scipy import linalg, stats
@@ -25,23 +25,7 @@ from osgeo import gdal
 from osgeo.gdalconst import GA_ReadOnly, GDT_UInt16, GDT_Int16, GDT_Float32, GDT_Int32
 import os, sys, time
 import math
-import ctypes
-import platform
-from numpy.ctypeslib import ndpointer
-if platform.system() == 'Windows':
-    lib = ctypes.cdll.LoadLibrary('prov_means.dll')
-else:
-    lib = ctypes.cdll.LoadLibrary('libprov_means.so')
-provmeans = lib.provmeans
-provmeans.restype = None
-c_double_p = ctypes.POINTER(ctypes.c_double)
-provmeans.argtypes = [ndpointer(np.float64),
-                      ndpointer(np.float64),
-                      ctypes.c_int,
-                      ctypes.c_int,
-                      c_double_p,
-                      ndpointer(np.float64),
-                      ndpointer(np.float64)]
+
 
 def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,4), penalty=0.0,
             datatype_out=GDT_UInt16, outdir=None):
@@ -157,9 +141,9 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
                 mads = np.asarray((tile[:,0:bands]-means1)*A - (tile[:,bands::]-means2)*B)
                 chisqr = np.sum((mads/sigMADs)**2,axis=1)
                 wts = 1-stats.chi2.cdf(chisqr,[bands])
-                cpm.update2(tile[idx, :], wts[idx])    # NL: update means and covariance using no-data values??
+                cpm.update(tile[idx, :], wts[idx])    # NL: update means and covariance using no-data values??
             else:
-                cpm.update2(tile[idx, :])
+                cpm.update(tile[idx, :])
 #     weighted covariance matrices and means
         S = cpm.covariance()
         means = cpm.means()
@@ -323,6 +307,7 @@ def provisional_means(Xs, Ws, NN, n, sw, mn, cov):
     d = np.zeros(n*NN)  # empty array
     Xs = Xs.flatten()
     cov_shape = cov.shape
+    cov = cov.flatten()
     for i in range(0, n):
         w = Ws[i]  # equivalent to dereferencing the Ws array in C
         sw += Ws[i]  # sw = sw+Ws (essentially adding a small offset to Ws the first time. sw may change later)
@@ -334,6 +319,6 @@ def provisional_means(Xs, Ws, NN, n, sw, mn, cov):
         # update the covariance cov
         for j in range(0, NN):
             for k in range(j, NN):
-                cov = cov.flatten()
                 cov[j*NN+k] += d[j]*d[k]*(1-r)*w
+    cov = np.reshape(cov, cov_shape)
     return sw, mn, cov
