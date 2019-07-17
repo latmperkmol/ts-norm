@@ -1,7 +1,7 @@
 import numpy as np
 
 
-def seg_fit(vector, maxsegs, maxerror, spacing_array=[], max_iter=1000):
+def seg_fit(vector, maxsegs, maxerror, spacing_array=None, max_iter=1000):
     """
     # Purpose: Given a set of values, fit a series in linear segments
     :param vector: 1D array of values to fit using linear segments
@@ -15,8 +15,8 @@ def seg_fit(vector, maxsegs, maxerror, spacing_array=[], max_iter=1000):
     initial = np.arange(len(vector)-1)    # start of each segment
     final = np.arange(len(vector)-1)+1    # end of each segment
     n_segs = len(vector)
-    if spacing_array != []:
-        xvals = spacing_array
+    if spacing_array != None:
+        xvals = np.array(spacing_array)
     else:
         xvals = range(0, len(vector))
 
@@ -63,25 +63,11 @@ def seg_fit(vector, maxsegs, maxerror, spacing_array=[], max_iter=1000):
             if final2[minimum_loc] == np.max(final2):
                 initial3 = initial[0:ind+1]
 
-            """
-            # construct the new final position vector
-            if final2[minimum_loc] == np.max(final2):
-                # if the place with the lowest error is the last value in the final2 vector, do this.
-                # TODO: fix TypeError: 'only integer scalar arrays can be converted to a scalar index'
-                # TODO: happening when second term is an empty array
-                final3 = final[0:-1]
-            elif ind == 0:
-                final3 = np.insert(final[find:len(final)], 0, int(final2[minimum_loc]))
-            else:
-                final3 = np.concatenate((final[0:ind], final[find-1:len(final)]))
-            """
             # construct the new final position vector
             final3 = np.concatenate((final[0:ind], final[find-1:len(final)]))
             if ind == 0:
                 final3 = np.insert(final[find:len(final)], 0, int(final2[minimum_loc]))
             if final2[minimum_loc] == np.max(final2):
-                #final3 = np.concatenate(final[0:ind], final[find:len(final)])
-                #print("final2[minimum_loc] == np.max(final2)")
                 final3 = np.append(final[0:ind], final[find])
 
             # update the segment vectors
@@ -97,7 +83,7 @@ def seg_fit(vector, maxsegs, maxerror, spacing_array=[], max_iter=1000):
             print("Max iterations reached. ")
             break
 
-    # where TX used VECTSIMPLIFIED, use "output_vectors". Move to a mandatory output instead of optional argument
+    # where TX used VECTSIMPLIFIED, use "output_vectors".
     output_vectors = []
     for i in range(0, len(initial)):
         segment = np.interp(xvals[initial[i]:final[i]+1], [xvals[initial[i]], xvals[final[i]]], [vector[initial[i]], vector[final[i]]])
