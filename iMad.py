@@ -28,7 +28,7 @@ import math
 
 
 def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,4), penalty=0.0,
-            datatype_out=GDT_UInt16, outdir=None):
+            datatype_out=GDT_Float32, outdir=None):
     """
     Tweaked version of iMad which eschews GUI.
     General requirements still required. Input images must have same spatial and spectral dimensions.
@@ -58,26 +58,26 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
     pos1 =  band_pos1
     if not pos1:
         return
-    dims = [0,0,cols,rows]
+    dims = [0, 0, cols,rows]
     if dims:
-        x10,y10,cols1,rows1 = dims
+        x10, y10, cols1, rows1 = dims
     else:
         return
 #  second image
     file2 = image2
     if file2:
-        inDataset2 = gdal.Open(file2,GA_ReadOnly)
+        inDataset2 = gdal.Open(file2, GA_ReadOnly)
         cols = inDataset2.RasterXSize
         rows = inDataset2.RasterYSize
         bands = inDataset2.RasterCount
     else:
         return
-    pos2 =  band_pos2
+    pos2 = band_pos2
     if not pos2:
         return
-    dims=[0,0,cols,rows]
+    dims = [0, 0, cols, rows]
     if dims:
-        x20,y20,cols,rows = dims
+        x20, y20, cols, rows = dims
     else:
         return
 #  penalization
@@ -216,10 +216,11 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
             tile[:,k] = rasterBands1[k].ReadAsArray(x10,y10+row,cols,1)
             tile[:,bands+k] = rasterBands2[k].ReadAsArray(x20,y20+row,cols,1)
         mads = np.asarray((tile[:,0:bands]-means1)*A - (tile[:,bands::]-means2)*B)  # MADs
-        chisqr = np.sum((mads/sigMADs)**2,axis=1)  # under no-change hypothesis, this sum is approx. chi2 distributed
+        chisqr = np.sum((mads/sigMADs)**2, axis=1)  # under no-change hypothesis, this sum is approx. chi2 distributed
         for k in range(bands):
-            outBands[k].WriteArray(np.reshape(mads[:,k],(1,cols)),0,row)
-        outBands[bands].WriteArray(np.reshape(chisqr,(1,cols)),0,row)       # output: first outbands are MADs for corresponding bands. Final "band" is the chisquared image.
+            outBands[k].WriteArray(np.reshape(mads[:,k],(1,cols)), 0, row)
+        # output: first outbands are MADs for corresponding bands. Final "band" is the chisquared image.
+        outBands[bands].WriteArray(np.reshape(chisqr, (1, cols)), 0, row)
     for outBand in outBands:
         outBand.FlushCache()
     outDataset = None

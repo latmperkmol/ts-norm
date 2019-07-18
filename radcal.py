@@ -125,7 +125,7 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
     if ncpThresh is None:
         return                 
     chisqr = inDataset3.GetRasterBand(imadbands).ReadAsArray(x30,y30,cols,rows).ravel()  # chi2 band of iMAD image
-    ncp = 1 - stats.chi2.cdf(chisqr, [imadbands-1])  # NL: chi2 cumulative dist w 'bands' degrees of freedom
+    ncp = 1 - stats.chi2.cdf(chisqr, [imadbands-1])  # NL: no change probability. chi2 cdf w 'bands' degrees of freedom
     idx = np.where(ncp > ncpThresh)[0]  # NL: 1D array w indices of pixels above the no-change threshold
 #  split train/test in ratio 2:1 
     tmp = np.asarray(range(len(idx)))

@@ -962,7 +962,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
                                                "veg_mask_downsample.tif", outdir=outdir)
     veg_mask_downsamp_arr = img_to_array(veg_mask_downsamp)
     planet_downsamp_vegmasked = set_no_data(veg_mask_downsamp_arr, downsampled_img, outfile="planet_with_veg_mask.tif",
-                                            outdir=outdir, src_nodata=src_nodataval, dst_nodata=dst_nodataval,
+                                            outdir=outdir, src_nodata=dst_nodataval, dst_nodata=dst_nodataval,
                                             datatype_out=datatype_out)[1]
 
     # Step 5: add no data values into Landsat image so that it will play nice with iMad.py and radcal.py
