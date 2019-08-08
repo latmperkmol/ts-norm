@@ -17,16 +17,17 @@
 #    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
 #    GNU General Public License for more details.
 #
-#    Modified by Nicholas Leach
+#    Modified by Nicholas Leach, 2019
 
-import auxil.auxil as auxil
 import numpy as np
 from scipy import linalg, stats
 from osgeo import gdal
 from osgeo.gdalconst import GA_ReadOnly, GDT_UInt16, GDT_Int16, GDT_Float32, GDT_Int32
 import os, sys, time
+import math
 
-def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,4], penalty=0.0,
+
+def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,4), penalty=0.0,
             datatype_out=GDT_UInt16, outdir=None):
     """
     Tweaked version of iMad which eschews GUI.
@@ -104,7 +105,7 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
     print('time2: '+file2)
     print('Delta    [canonical correlations]')
 #  iteration of MAD
-    cpm = auxil.Cpm(2*bands)
+    cpm = Cpm(2*bands)
     delta = 1.0
     oldrho = np.zeros(bands)
     itr = 0
@@ -140,9 +141,9 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
                 mads = np.asarray((tile[:,0:bands]-means1)*A - (tile[:,bands::]-means2)*B)
                 chisqr = np.sum((mads/sigMADs)**2,axis=1)
                 wts = 1-stats.chi2.cdf(chisqr,[bands])
-                cpm.update(tile[idx,:],wts[idx])    # NL: only update locations where both images have non-zero pixels
+                cpm.update(tile[idx, :], wts[idx])    # NL: update means and covariance using no-data values??
             else:
-                cpm.update(tile[idx,:])             # NL: leave no-data pixels as such (?)
+                cpm.update(tile[idx, :])
 #     weighted covariance matrices and means
         S = cpm.covariance()
         means = cpm.means()
@@ -160,8 +161,8 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
         b2 = s22
 #     solution of generalized eigenproblems
         if bands>1:
-            mu2a,A = auxil.geneiv(c1,b1)
-            mu2b,B = auxil.geneiv(c2,b2)
+            mu2a,A = geneiv(c1,b1)
+            mu2b,B = geneiv(c2,b2)
 #          sort a
             idx = np.argsort(mu2a)
             A = A[:,idx]
@@ -227,3 +228,97 @@ def run_MAD(image1, image2, outfile_name, band_pos1=[1,2,3,4], band_pos2=[1,2,3,
     print('result written to: '+outfile)
     print('--------done---------------------')
     return
+
+
+class Cpm(object):
+    """Provisional means algorithm"""
+
+    def __init__(self, N):
+        self.mn = np.zeros(N)
+        self.cov = np.zeros((N, N))
+        self.sw = 0.0000001
+
+    def update(self, Xs, Ws=None):
+        # testing a version of update that eschews the provisional means dll
+        # it will be less efficient but easier to troubleshoot and implement
+        # reference Nick Leach's python implementation provisional_means
+        n, N = np.shape(Xs)
+        if Ws is None:
+            Ws = np.ones(n)
+        sw = self.sw
+        mn = self.mn
+        cov = self.cov
+        n, N = np.shape(Xs)
+        sw, mn, cov = provisional_means(Xs, Ws, N, n, sw, mn, cov)
+        self.sw = sw
+        self.mn = mn
+        self.cov = cov
+
+    def covariance(self):
+        c = np.mat(self.cov / (self.sw - 1.0))
+        d = np.diag(np.diag(c))
+        return c + c.T - d
+
+    def means(self):
+        return self.mn
+
+
+def choldc(A):
+    # Cholesky-Banachiewicz algorithm,
+    # A is a numpy matrix
+    L = A - A
+    for i in range(len(L)):
+        for j in range(i):
+            sm = 0.0
+            for k in range(j):
+                sm += L[i,k]*L[j,k]
+            L[i,j] = (A[i,j]-sm)/L[j,j]
+        sm = 0.0
+        for k in range(i):
+            sm += L[i,k]*L[i,k]
+        L[i,i] = math.sqrt(A[i,i]-sm)
+    return L
+
+
+def geneiv(A,B):
+    # solves A*x = lambda*B*x for numpy matrices A and B,
+    # returns eigenvectors in columns
+    Li = np.linalg.inv(choldc(B))
+    C = Li*A*(Li.transpose())
+    C = np.asmatrix((C + C.transpose())*0.5, np.float32)
+    eivs,V = np.linalg.eig(C)
+    return eivs, Li.transpose()*V
+
+
+def provisional_means(Xs, Ws, NN, n, sw, mn, cov):
+    """
+    Provisional means algorithm, adapted from C++ code written by Mort Canty
+    In original script, Xs is pointer, Ws is pointer, NN is int, n is int, sw is double, mn is pointer, cov is pointer.
+    Written by Nick Leach
+    :param Xs: (numpy array) input array with data values. Must be 1D??
+    :param Ws: (numpy array) weights of the input values??
+    :param NN: (int) columns of Xs
+    :param n: (int) rows of Xs
+    :param sw: (float, I think) offset parameter or something. Probably stands for "sum of the weights"
+    :param mn: (numpy array) empty 1D numpy array with length N. Will store means.
+    :param cov: (numpy array) empty 2D numpy array with dimensions n, N
+    :return:
+    """
+    d = np.zeros(n*NN)  # empty array
+    Xs = Xs.flatten()
+    cov_shape = cov.shape
+    cov = cov.flatten()
+    for i in range(0, n):
+        w = Ws[i]  # equivalent to dereferencing the Ws array in C
+        sw += Ws[i]  # sw = sw+Ws (essentially adding a small offset to Ws the first time. sw may change later)
+        r = w/sw  # r is the ith weight divided by the sum of the weights
+        # update the means mn
+        for j in range(0, NN):
+            d[j] = Xs[i*NN+j] - mn[j]
+            mn[j] += d[j]*r
+        # update the covariance cov
+        for j in range(0, NN):
+            for k in range(j, NN):
+                cov[j*NN+k] += d[j]*d[k]*(1-r)*w
+    cov = np.reshape(cov, cov_shape)
+    return sw, mn, cov

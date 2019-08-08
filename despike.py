@@ -10,14 +10,14 @@ def despike(vector, threshold, known_spikes=None):
     IMPORTANT - has not been tested with known spikes!!  Suspect there are errors in that section of code.
     Only despikes one vector currently. Must be run on each band individually
     :param vector: (ndarray) raw data to be despiked.
-    :param threshold: (float) number 0-1 determining how much to despike. Lower number -> more despiking
+    :param threshold: (float) number 0-1 determining how much to despike. Higher number -> more despiking
     :param known_spikes:
     :return: trozo, valuest. trozo is some kind of boolean array.
         valuest is ndarray of the despiked data
     """
     # TODO: test with known spikes
     # TODO: add ability to despike multiband (2D array) data
-    vec = vector
+    vec = np.copy(vector)
     if isinstance(vec, str):
         vec = np.loadtxt(vec)
 
