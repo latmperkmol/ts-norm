@@ -27,8 +27,7 @@ import os, sys, time
 import math
 
 
-def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,4), penalty=0.0,
-            datatype_out=GDT_Float32, outdir=None):
+def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,4), penalty=0.0, outdir=None):
     """
     Tweaked version of iMad which eschews GUI.
     General requirements still required. Input images must have same spatial and spectral dimensions.
@@ -198,7 +197,7 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
         itr += 1
 # write results to disk
     driver = gdal.GetDriverByName(fmt)
-    outDataset = driver.Create(outfile, cols, rows, bands+1, datatype_out)
+    outDataset = driver.Create(outfile, cols, rows, bands+1, GDT_Float32)  # want to write a float!!
     projection = inDataset1.GetProjection()
     geotransform = inDataset1.GetGeoTransform()
     if geotransform is not None:

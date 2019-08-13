@@ -1054,6 +1054,10 @@ if __name__ == '__main__':
         udm = None
     output_dir = input("Location of directory to save outputs? (will be created if does not exist): ")
     assert isinstance(output_dir, str)
+    udms = input("Apply a usable data mask? Filepath if yes, otherwise n: ")
+    assert isinstance(udms, str)
+    if udms == "n":
+        udms = False
     allowRegistration = input("Allow target image to be re-registered if needed? y/n: ")
     assert isinstance(allowRegistration, str)
     while (allowRegistration != "y") and (allowRegistration != "n"):
