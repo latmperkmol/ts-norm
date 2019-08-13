@@ -15,7 +15,7 @@ def seg_fit(vector, maxsegs, maxerror, spacing_array=None, max_iter=1000):
     initial = np.arange(len(vector)-1)    # start of each segment
     final = np.arange(len(vector)-1)+1    # end of each segment
     n_segs = len(vector)
-    if spacing_array != None:
+    if spacing_array is not None:
         xvals = np.array(spacing_array)
     else:
         xvals = range(0, len(vector))
