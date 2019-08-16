@@ -941,7 +941,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
         clipped_downsampled_target_name = downsampled_img[:-4] + "_clip.tif"
         clipped_fullres_target_name = image2_aligned[:-4] + "_clip.tif"
         shapefile_path = make_shapefile_from_raster(cropped_img, shapefile_name, outdir=outdir)
-        downsampled_img = clip_to_shapefile(downsampled_img, shapefile_path, force_dims=cropped_dimensions,
+        downsampled_img = clip_to_shapefile(downsampled_img, shapefile_path,
                                             outname=clipped_downsampled_target_name, outdir=outdir)
         image2_aligned = clip_to_shapefile(image2_aligned, shapefile_path,
                                            outname=clipped_fullres_target_name, outdir=outdir)
@@ -975,8 +975,8 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     # at this point, we have a Planet image at Landsat resolution and a Landsat image with Planet no-data values.
     # everything we need for MAD + radcal to run
     # planet_img = downsampled version of planet at this point
-    planet_img_novegmask = no_data_out_novegmask[0]  # note that planet_img and landsat_img include paths
-    landsat_img_novegmask = no_data_out_novegmask[1]
+    target_img_novegmask = no_data_out_novegmask[0]  # note that planet_img and landsat_img include paths
+    reference_img_novegmask = no_data_out_novegmask[1]
     planet_img_vegmask = no_data_out_vegmask[0]  # note that planet_img and landsat_img include paths
     landsat_img_vegmask = no_data_out_vegmask[1]
 
@@ -985,13 +985,15 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample, allowRegistratio
     print("Time elapsed: " + str(int(end-start)) + " seconds")
     print("===============================")
     print("Beginning MAD...")
-    outfile_MAD = os.path.split(planet_img_novegmask)[1][:-4] + "_MAD.tif"
-    outfile_RAD = os.path.split(planet_img_novegmask)[1][:-4] + "_RAD.tif"
+    outfile_MAD = os.path.split(target_img_novegmask)[1][:-4] + "_MAD.tif"
+    outfile_RAD = os.path.split(target_img_novegmask)[1][:-4] + "_RAD.tif"
     outfile_final = os.path.split(image_targ)[1][:-4] + "_FINAL.tif"
     run_MAD(planet_img_vegmask, landsat_img_vegmask, outfile_MAD, outdir=outdir)
     # image2_aligned is the full resolution Planet scene
     print("Beginning radcal...")
-    normalized_fsoutfile = run_radcal(planet_img_novegmask, landsat_img_novegmask, outfile_RAD, outfile_MAD,
+    print("Target image: " + os.path.split(target_img_novegmask)[1])
+    print("Reference image: " + os.path.split(reference_img_novegmask)[1])
+    normalized_fsoutfile = run_radcal(target_img_novegmask, reference_img_novegmask, outfile_RAD, outfile_MAD,
                                       image2_aligned, view_plots=view_radcal_fits, outdir=outdir,
                                       nochange_thresh=nochange_thresh)
     # Step 6: re-apply no-data values to the radiometrically corrected full-resolution planet image

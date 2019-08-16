@@ -54,7 +54,7 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
         bands = inDataset1.RasterCount
     else:
         return
-    pos1 =  band_pos1
+    pos1 = band_pos1
     if not pos1:
         return
     dims = [0, 0, cols,rows]
@@ -100,8 +100,8 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
     print('       iMAD')
     print('=========================')
     print(time.asctime())
-    print('time1: '+file1)
-    print('time2: '+file2)
+    print('Target: '+file1)
+    print('Reference: '+file2)
     print('Delta    [canonical correlations]')
 #  iteration of MAD
     cpm = Cpm(2*bands)
@@ -178,7 +178,7 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
         a2 = np.diag(A.T*A)
         b2 = np.diag(B.T*B)
         sigma = np.sqrt( (2-lam*(a2+b2))/(1-lam)-2*mu )
-        rho=mu*(1-lam)/np.sqrt( (1-lam*a2)*(1-lam*b2) )
+        rho = mu*(1-lam)/np.sqrt( (1-lam*a2)*(1-lam*b2) )
 #      stopping criterion
         delta = max(abs(rho-oldrho))
         print(delta, rho)
