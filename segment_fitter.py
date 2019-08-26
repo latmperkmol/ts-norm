@@ -44,13 +44,12 @@ def seg_fit(vector, maxsegs, maxerror, spacing_array=None, max_iter=1000):
             # this will mean that there is no value in initial corresponding the final2[minimum_loc]
             # this is what IDL does by default
             find = -1
-
         else:
-            # find is the location in the initial's vector where the error is a minimum in the final2 vector
+            # find is the location in the initial vector where the error is a minimum in the final2 vector
             # issue is that the final2 vector can have values beyond the initial vector (i.e. end of the last segment)
             find = np.argwhere(initial == final2[minimum_loc])
             find = find.flatten()[0]
-        # ind is the location in the initial's vector where the error is a minimum in the initial2 vector
+        # ind is the location in the initial vector where the error is a minimum in the initial2 vector
         ind = np.argwhere(initial == initial2[minimum_loc])     # outputs an array
         ind = ind.flatten()[0]
 
@@ -83,7 +82,6 @@ def seg_fit(vector, maxsegs, maxerror, spacing_array=None, max_iter=1000):
             print("Max iterations reached. ")
             break
 
-    # where TX used VECTSIMPLIFIED, use "output_vectors".
     output_vectors = []
     for i in range(0, len(initial)):
         segment = np.interp(xvals[initial[i]:final[i]+1], [xvals[initial[i]], xvals[final[i]]], [vector[initial[i]], vector[final[i]]])

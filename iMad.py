@@ -178,7 +178,7 @@ def run_MAD(image1, image2, outfile_name, band_pos1=(1,2,3,4), band_pos2=(1,2,3,
         a2 = np.diag(A.T*A)
         b2 = np.diag(B.T*B)
         sigma = np.sqrt( (2-lam*(a2+b2))/(1-lam)-2*mu )
-        rho = mu*(1-lam)/np.sqrt( (1-lam*a2)*(1-lam*b2) )
+        rho = mu*(1-lam)/np.sqrt( (1-lam*a2)*(1-lam*b2) )  # eigenvalues of dispersion matrices
 #      stopping criterion
         delta = max(abs(rho-oldrho))
         print(delta, rho)

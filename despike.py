@@ -12,7 +12,7 @@ def despike(vector, threshold, known_spikes=None):
     :param vector: (ndarray) raw data to be despiked.
     :param threshold: (float) number 0-1 determining how much to despike. Higher number -> more despiking
     :param known_spikes:
-    :return: trozo, valuest. trozo is some kind of boolean array.
+    :return: piece, valuest. piece is some kind of boolean array.
         valuest is ndarray of the despiked data
     """
     # TODO: test with known spikes
@@ -25,39 +25,41 @@ def despike(vector, threshold, known_spikes=None):
     if type(known_spikes) == np.ndarray:
         spike_locations = known_spikes
         #spike_locations = np.loadtxt(known_spikes, delimiter=',')
-        trozo = spike_locations[1:len(spike_locations)-2]       # suspect that this line is bad. may need -1 instead
-        # intializing other arrays to match trozo
-        spike0 = trozo
-        spike = trozo
-        trozi = trozo*0.0
+        piece = spike_locations[1:len(spike_locations)-2]       # suspect that this line is bad. may need -1 instead
+        # intializing other arrays to match piece
+        spike0 = piece
+        spike = piece
+        chunks = piece*0.0
 
-        if np.sum(trozo) != 0:
-            indexMAX = np.argwhere(trozo)
+        if np.sum(piece) != 0:
+            indexMAX = np.argwhere(piece)
 
-            for i in range(0, int(np.sum(trozo)-1)):
+            for i in range(0, int(np.sum(piece)-1)):
                vec[indexMAX[i]+1] = np.mean([vec[indexMAX[i]], vec[indexMAX[i]+2]])
                spike[indexMAX[i]] = 0
-               trozi[indexMAX[i]] = 1
+               chunks[indexMAX[i]] = 1
 
     # If the spikes need to be detected, proceed as below
     else:
-        left = vec[0:len(vec)-2]
-        right = vec[2:len(vec)]
-        spike = abs(vec[1:len(vec)-1]-((left+right)/2.))        # magnitude of the spikes
+        left = vec[0:-2]
+        right = vec[2:]
+        # measurement of each point's deviation from expectation: (actual point / expectation from linear interpolation)
+        # when spike = 0, point is exactly as "expected"
+        spike = abs(vec[1:-1]-((left+right)/2.))    # numerator:   // denominator: average of points to left and right
         spike0 = spike
-        similarity = abs(left-right)/(spike+0.0000000000001)  # similarity of subsequent points
+        similarity = abs(left-right)/(spike+0.0000000000001)  # similarity of subsequent points (low means less similar)
         standardized_sim = similarity/np.std(similarity)
         new_thresh = np.max(standardized_sim)*threshold  # 1 despikes everything, 0 despikes nothing
-        trozo = (similarity < new_thresh * (spike != 0.))  # if the difference < 1-threshold, mark as binary spike, unless 'spike' is 0 there??
+        piece = (similarity < new_thresh * (spike != 0.))  # if the difference < 1-threshold, mark as binary spike, unless 'spike' is 0 there
 
-        trozi = trozo*0  # make an empty array
+        chunks = piece*0  # make an empty array
         iteration = 0
-        while (np.sum(trozo) != 0) and (iteration < 1000):  # while there are spikes
-            indexMAX = np.argmax(spike*trozo)  # need to assign 'indexMAX' the location of the largest value of spike*trozo
+        while (np.sum(piece) != 0) and (iteration < 1000):  # while there are spikes
+            indexMAX = np.argmax(spike*piece)  # need to assign 'indexMAX' the location of the largest value of spike*piece
 
             vec[indexMAX+1] = np.mean([vec[indexMAX], vec[indexMAX+2]])
             spike[indexMAX] = 0
-            trozi[indexMAX] = 1
+            chunks[indexMAX] = 1
 
             left = vec[0:len(vec)-3]
             right = vec[2:len(vec)-1]
@@ -65,28 +67,27 @@ def despike(vector, threshold, known_spikes=None):
             similarity = abs(left-right)/(spike+0.0000000000001)
             standardized_sim = similarity / np.std(similarity)
             new_thresh = np.max(standardized_sim) * threshold
-            trozo = (similarity < new_thresh * (spike != 0.))  # if the difference < 1-threshold, mark as binary spike, unless 'spike' is 0 there
+            piece = (similarity < new_thresh * (spike != 0.))  # if the difference < 1-threshold, mark as binary spike, unless 'spike' is 0 there
             # this method flags values with small "similarity" as spikes
             iteration += 1
 
-    trozo = trozi
+    piece = chunks
     if type(known_spikes) == np.ndarray:
-        #spike_locations = np.loadtxt(known_spikes, delimiter=',')
         spike_locations = known_spikes
-        trozo = np.append(trozo, spike_locations[len(spike_locations)-1])
-        trozo = np.insert(trozo, 0, 0)
+        piece = np.append(piece, spike_locations[len(spike_locations)-1])
+        piece = np.insert(piece, 0, 0)
         if spike_locations[len(spike_locations)-1] == 1:
             vec[len(vec)-1] = vec[len(vec)-2]
     else:
-        trozo = np.insert(trozo, 0, 0)
+        piece = np.insert(piece, 0, 0)
         if np.std([vec[len(vec)-2:len(vec)-1]]) > np.std([vec[len(vec)-3:len(vec)-2]]):
             vec[len(vec)-1] = vec[len(vec)-2]
-            trozo = np.append(trozo, 1)
+            piece = np.append(piece, 1)
         else:
-            trozo = np.append(trozo, 0)
+            piece = np.append(piece, 0)
 
     valuest = vec
-    return trozo, valuest
+    return piece, valuest
 
 
 if __name__ == '__main__':
