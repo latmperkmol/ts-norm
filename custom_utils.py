@@ -971,7 +971,6 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
 
     # Step 5: add no data values into Landsat image so that it will play nice with iMad.py and radcal.py
     reference_nodata = os.path.split(cropped_img)[1][:-4] + "_nodata.tif"
-    # TODO: files coming out of here sometimes have dimensions that are off by one pixel. Fix.
     no_data_out_novegmask = set_no_data(downsampled_img, cropped_img, reference_nodata, outdir=outdir,
                                         dst_nodata=dst_nodataval)  # need version that hasn't been masked too.
     no_data_out_vegmask = set_no_data(target_downsamp_vegmasked, cropped_img, reference_nodata, outdir=outdir,
