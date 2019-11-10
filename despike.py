@@ -50,7 +50,7 @@ def despike(vector, threshold, known_spikes=None):
         similarity = abs(left-right)/(spike+0.0000000000001)  # similarity of subsequent points (low means less similar)
         standardized_sim = similarity/np.std(similarity)
         new_thresh = np.max(standardized_sim)*threshold  # 1 despikes everything, 0 despikes nothing
-        piece = (similarity < new_thresh * (spike != 0.))  # if the difference < 1-threshold, mark as binary spike, unless 'spike' is 0 there
+        piece = ((similarity < new_thresh) * (spike != 0.))  # if the difference < 1-threshold, mark as binary spike, unless 'spike' is 0 there
 
         chunks = piece*0  # make an empty array
         iteration = 0

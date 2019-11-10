@@ -282,8 +282,8 @@ def run_radcal(image1, image2, outfile_name, iMAD_img, full_target_scene, band_p
 def orthoregress(x, y):
     Xm = np.mean(x)
     Ym = np.mean(y)
-    s = np.cov(x,y)
-    R = s[0, 1]/math.sqrt(s[1, 1]*s[0, 0])
+    s = np.cov(x,y)  # diagonal elements (s[0,0] and s[1,1]) are standard deviations
+    R = s[0, 1]/math.sqrt(s[1, 1]*s[0, 0])  # corr coef. covar divided by sqrt of product of standard deviations
     lam, vs = np.linalg.eig(s)
     idx = np.argsort(lam)
     vs = vs[:, idx]      # increasing order, so
