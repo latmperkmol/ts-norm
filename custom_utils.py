@@ -816,7 +816,6 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
     :param datatype_out: GDAL data type to save outputs, e.g. gdal.GDT_Float32.
     :return: outpath_final: (str) path to final output image.
     """
-    # TODO: remove "allowDownsample" as an argument all together; currently deprecated
     start = time.time()
     # Step 0: check image metadata to see if it has an acceptable level of cloud.
     image_targ_dir = os.path.split(image_targ)[0]
@@ -948,6 +947,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
                                            outname=clipped_fullres_target_name, outdir=outdir)
 
     # Step 4: generate a veg mask at Planet resolution, downsample and apply, but save full res for later
+    # TODO: swap this to a mask layer rather than assigning no-data values
     VI_calc_out_full_res = calc_VIs(image2_aligned, nodataval=dst_nodataval)
     ndvi_full_res = VI_calc_out_full_res[0]
     veg_mask_full_res_arr = vegetation_mask(ndvi_full_res, threshold=ndvi_thresh)
