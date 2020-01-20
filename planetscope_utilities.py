@@ -1,6 +1,8 @@
 import numpy as np
 import gdal
 import os
+import warnings
+import json
 
 
 def scale_image(img_path, nodata, outdir=None, datatype_out=gdal.GDT_UInt16):
@@ -52,3 +54,29 @@ def scale_image(img_path, nodata, outdir=None, datatype_out=gdal.GDT_UInt16):
     target_DS = None
     img_src = None
     return
+
+
+def check_for_clouds(directory=".", tolerance=0.5):
+    """
+    Check the PlanetSCope metadata file for the target image and assess the fraction of cloud.
+    Images exceeding cloud tolerance will not be processed.
+    If multiple metadata files are present in the directory, the mean cloud fraction is used (suitable for mosaics)
+
+    :param directory: (string) directory containing JSON files with image metadata
+    :param tolerance: (float) values 0-1.0 (inclusive) are valid. Permissible fraction of cloud cover.
+    :return: (boolean) True for a usable image, False otherwise.
+    """
+    cloud = []
+    for dirpath, dirnames, filenames in os.walk(directory):
+        for filename in [f for f in filenames if f.endswith("metadata.json")]:
+            with open(os.path.join(dirpath, filename)) as file:
+                metadata = json.load(file)
+                cloud.append(metadata["properties"]["cloud_cover"])
+    if not cloud:
+        warnings.warn("Couldn't find the Planet metadata.json file. Assuming cloud cover is at an acceptable level. ")
+        return True
+    cloud_frac = sum(cloud)/len(cloud)
+    if tolerance >= cloud_frac >= 0.0:
+        return True
+    else:
+        return False

@@ -6,7 +6,7 @@ In general, this should be run from terminal.
 User will be prompted for directory containing TIF files and location of shapefile containing zones of interest.
 
 Some functions are better called from a python script.
-E.g. generating VIs using save_VIs() is most efficiently executed from a python script.
+E.g. generating VIs using save_veg_indices() is most efficiently executed from a python script.
 
 Once you've saved a JSON with all the cell statistics, it can easily be loaded back in as a dictionary:
 with open(filelocation) as fp:

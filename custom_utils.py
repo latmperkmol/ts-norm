@@ -10,6 +10,7 @@ import warnings
 import json
 import math
 from rasterio.warp import reproject, Resampling
+import rasterio.crs
 import numpy as np
 import numpy.ma as ma
 import gdal, osr
@@ -77,16 +78,21 @@ def udm_merger(rasterpaths, outpath, src_nodata=1.0):
     return outpath
 
 
-def save_VIs(rasterpath, outdir=None, nodataval = 0.0, save_ndvi=True, save_evi=False):
+def save_veg_indices(rasterpath, outdir=None, save_ndvi=True, save_evi=False):
     """
     Generates two new GeoTiffs: the NDVI and EVI for the input raster.
 
     :param rasterpath: path to the raster
     :param outdir: (str) directory to save outputs
-    :param nodataval: no-data value in the input images
+    :param save_ndvi: (bool) whether or not to save the NDVI to disk
+    :param save_evi: (bool) whether or not to save the EVI to disk
     :return:
     """
-    ndvi, evi, img_src, cols, rows = calc_VIs(rasterpath, nodataval)
+    # grab the input raster's meta information
+    with rasterio.open(rasterpath, 'r') as src:
+        meta = src.meta
+
+    ndvi, evi, img_src, cols, rows = calc_VIs(rasterpath, meta['nodata'])
 
     # grab the directory and original file name, then build new filenames
     dir_src, filename_src = os.path.split(rasterpath)[0], os.path.split(rasterpath)[1]
@@ -96,24 +102,16 @@ def save_VIs(rasterpath, outdir=None, nodataval = 0.0, save_ndvi=True, save_evi=
         filename_ndvi_src = os.path.join(dir_src, filename_src[:-4] + '-NDVI.tif')
     filename_evi_src = os.path.join(dir_src, filename_src[:-4] + '-EVI.tif')
 
-    # TODO: rewrite these two loops to use rasterio to reduce file locks and improve readability
+    # update meta for vegetation indices
+    vi_meta = meta.copy()
+    vi_meta['count'] = 1
+    vi_meta['dtype'] = 'float32'
     if save_ndvi:
-        ndvi_dst = gdal.GetDriverByName('GTiff').Create(filename_ndvi_src, cols, rows, 1, gdal.GDT_Float32)
-        ndvi_dst.GetRasterBand(1).WriteArray(ndvi[:, :])
-        ndvi_dst.SetGeoTransform(img_src.GetGeoTransform())
-        ndvi_dst.SetProjection(img_src.GetProjection())
-        ndvi_dst.FlushCache()
-        ndvi_dst = None
+        with rasterio.open(filename_ndvi_src, 'w', **vi_meta) as dst:
+            dst.write_band(1, ndvi)
     if save_evi:
-        evi_dst = gdal.GetDriverByName('GTiff').Create(filename_evi_src, cols, rows, 1, gdal.GDT_Float32)
-        evi_dst.GetRasterBand(1).WriteArray(evi[:, :])
-        evi_dst.SetGeoTransform(img_src.GetGeoTransform())
-        evi_dst.SetProjection(img_src.GetProjection())
-        evi_dst.FlushCache()
-        evi_dst = None
-    # Close up shop
-    img_src = None
-    src = None
+        with rasterio.open(filename_evi_src, 'w', **vi_meta) as dst:
+            dst.write_band(1, evi)
     return
 
 
@@ -207,30 +205,6 @@ def calc_img_stats(img_tif):
             'var': np.var(band)
         })
     return stats
-
-
-def check_for_clouds(directory=".", tolerance=0.5):
-    """
-    Check the metadata file for the input image to see if it good enough to run through iMad.
-
-    :param directory: (string) directory containing JSON files with image metadata
-    :return: usable: (boolean) True for a usable image, False otherwise.
-    """
-    # TODO: move all PlanetScope-specific tools to another file
-    cloud = []
-    for dirpath, dirnames, filenames in os.walk(directory):
-        for filename in [f for f in filenames if f.endswith("metadata.json")]:
-            with open(os.path.join(dirpath, filename)) as file:
-                metadata = json.load(file)
-                cloud.append(metadata["properties"]["cloud_cover"])
-    if not cloud:
-        warnings.warn("Couldn't find the Planet metadata.json file. Assuming cloud cover is at an acceptable level. ")
-        return True
-    cloud_frac = sum(cloud)/len(cloud)
-    if cloud_frac <= tolerance and cloud_frac >= 0.0:
-        return True
-    else:
-        return False
 
 
 def register_image2(target_img, reference_img, no_data_val=0.0, outdir=None):
@@ -442,6 +416,7 @@ def make_shapefile_from_raster(raster, outname="vectorized.shp", outdir=None):
 
 def update_projection(src_image, dst_image, outfile="reprojected.tif", outdir=None):
     """
+    Reproject dst_image using the CRS from src_image.
 
     :param src_image: Use the CRS from this image
     :param dst_image: Update this image with the CRS from the other image
@@ -469,7 +444,7 @@ def update_projection(src_image, dst_image, outfile="reprojected.tif", outdir=No
     return outfile
 
 
-def perform_downsample_rio(src_image, scale_factor_x, scale_factor_y, outfile="downsampled.tif", outdir=None):
+def perform_downsample(src_image, scale_factor_x, scale_factor_y, outfile="downsampled.tif", outdir=None):
     """
 
     :param src_image: (string) filepath of image to downsample
@@ -707,7 +682,7 @@ def array_to_img(array, outpath, ref_img, datatype_out=gdal.GDT_UInt16):
 
 
 # TODO: swap this whole function to rasterio
-def projection_check(image_1, image_2, outdir=None):
+def projection_match(image_1, image_2, outdir=None):
     """
     Check if image1 and image2 are in the same spatial reference system.
     If they are not, the SRS from image 1 is applied to image 2. The reprojected image is saved either in the folder
@@ -729,7 +704,7 @@ def projection_check(image_1, image_2, outdir=None):
         print("Image projections are identical")
         return image_2
     else:
-        warnings.warn("Oh no! The projections are different! Attemping to fix that. ")
+        warnings.warn("The projections are different. Attemping to fix that. ")
         print("Assigning projection from " + os.path.split(image_1)[1] + " to " + os.path.split(image_2)[1])
         if outdir:
             dir_target = outdir
@@ -755,6 +730,8 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
     :param src_nodataval: (float) no-data value in the input images
     :param dst_nodataval: (float) no-data value to be applied to the output images
     :param udm: (list, tuple, or string) filepath of Unusable Data Mask(s) which will be applied to the final image
+    :param ndvi_thresh: (float) values -1.0 to 1.0 are valid. Any pixels with NDVI below set threshold will be masked.
+    :param nochange_thresh: (float) values 0 to 1.0 (exclusive) are valid. Chi2 threshold for invariance in MAD.
     :param outdir: (str) folder to save all outputs. Will be created if it does not exist.
     :param datatype_out: GDAL data type to save outputs, e.g. gdal.GDT_Float32.
     :param is_ps: (bool) if the target image is from PlanetScope, PS-specific functions will be applied
@@ -767,10 +744,10 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
         try:
             import planetscope_utilities as psu
         except ImportError:
-            warnings.warn("is_ps == True, but cannot import planetscope_utilities. Proceeding without PS fucntions.")
+            warnings.warn("is_ps == True, but cannot import planetscope_utilities. Proceeding without PS functions.")
             is_ps = False
     if is_ps:
-        below_cloud_thresh = check_for_clouds(image_targ_dir, tolerance=0.5)  #TODO move this func
+        below_cloud_thresh = psu.check_for_clouds(image_targ_dir, tolerance=0.5)
         if not below_cloud_thresh:
             print("Image is above cloud threshold. Either use a different image or increase threshold.")
             cloudOverride = input("Override cloud threshold? y/n: ")
@@ -790,24 +767,22 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
             os.mkdir(outdir)
 
     # Step 0.5: check to make sure all input images are in the same projection
-    # TODO: pull this from rasterio instead
-    rad_ref_DS = gdal.Open(image_ref)
-    reg_ref_DS = gdal.Open(image_reg_ref)
-    target_DS = gdal.Open(image_targ)
-    rad_ref_prj = rad_ref_DS.GetProjection()
-    reg_ref_prj = reg_ref_DS.GetProjection()
-    target_prj = target_DS.GetProjection()
-    rad_ref_srs = osr.SpatialReference(wkt=rad_ref_prj).GetAttrValue('authority', 1)
-    reg_ref_srs = osr.SpatialReference(wkt=reg_ref_prj).GetAttrValue('authority', 1)
-    target_srs = osr.SpatialReference(wkt=target_prj).GetAttrValue('authority', 1)
-    if (rad_ref_srs == reg_ref_srs == target_srs):
-        print("All projections are the same. Good. ")
-    else:
-        warnings.warn("The projections are different. Attemping to fix that. ")
-        print("Projection of the radiometric reference: " + str('EPSG:'+rad_ref_srs))
-        print("Projection of the registration reference: " + str('EPSG:'+reg_ref_srs))
-        print("Projection of the target image: " + str('EPSG:'+target_srs))
-        if rad_ref_srs != reg_ref_srs:
+    with rasterio.open(image_ref) as src:
+        rad_ref_meta = src.meta
+    with rasterio.open(image_reg_ref) as src:
+        reg_ref_meta = src.meta
+    with rasterio.open(image_targ) as src:
+        image_targ_meta = src.meta
+    rad_ref_crs = rasterio.crs.CRS(rad_ref_meta['crs'])
+    reg_ref_crs = rasterio.crs.CRS(reg_ref_meta['crs'])
+    target_crs = rasterio.crs.CRS(image_targ_meta['crs'])
+    # TODO this may fail if a crs is not already set up as an epsg
+    if not rad_ref_crs.to_epsg() == reg_ref_crs.to_epsg() == target_crs.to_epsg():
+        warnings.warn("The projects are different. Attempting to fix that. ")
+        print("Projection of the radiometric reference: " + rad_ref_crs.to_string())
+        print("Projection of the registration reference: " + reg_ref_crs.to_string())
+        print("Projection of the target image: " + target_crs.to_string())
+        if rad_ref_crs.to_string() != reg_ref_crs.to_string():
             if outdir:
                 dir_target = outdir
             else:
@@ -815,7 +790,7 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
             reproj_reg_ref = os.path.join(dir_target, 'reg_ref_reprojected.tif')
             update_projection(image_ref, image_reg_ref, 'reg_ref_reprojected.tif', outdir=dir_target)
             image_reg_ref = reproj_reg_ref
-        if rad_ref_srs != target_srs:
+        if rad_ref_crs.to_string() != target_crs.to_string():
             if outdir:
                 dir_target = outdir
             else:
@@ -823,18 +798,12 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
             reproj_target = os.path.join(dir_target, os.path.split(image_targ)[1][:-4] + '_reproj.tif')
             update_projection(image_ref, image_targ, reproj_target, outdir=dir_target)
             image_targ = reproj_target
-    # while the files are open, also grab resolution and number of bands
-    bands_ref = rad_ref_DS.RasterCount
-    bands_targ = target_DS.RasterCount
-    # TODO: use a safer method to do this. rasterio
-    res_ref_x = abs(rad_ref_DS.GetGeoTransform()[1])
-    res_ref_y = abs(rad_ref_DS.GetGeoTransform()[5])
-    res_targ_x = abs(target_DS.GetGeoTransform()[1])
-    res_targ_y = abs(target_DS.GetGeoTransform()[5])
-    # close files
-    del rad_ref_DS
-    del reg_ref_DS
-    del target_DS
+
+    # Grab the spatial resolution of the images and check if they match for later
+    res_ref_x = abs(rad_ref_meta['transform'][0])
+    res_ref_y = abs(rad_ref_meta['transform'][4])
+    res_targ_x = abs(image_targ_meta['transform'][0])
+    res_targ_y = abs(image_targ_meta['transform'][4])
     if (res_ref_x != res_targ_x) or (res_ref_y != res_targ_y):
         print("Reference image and target image have different spatial resolutions")
         different_resolutions = True
@@ -842,6 +811,7 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
     else:
         different_resolutions = False
         allowDownsample = False
+
     # Step 1: grab a reference image snip that will be used to align the target image.
     trim_out = trim_to_image(image_reg_ref, image_targ, allow_downsample=False, outdir=outdir)
 
@@ -868,14 +838,14 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
                     image2_aligned)
         # need to also make a downsampled version of the target image
         if different_resolutions:
-            downsampled_img = perform_downsample_rio(image_targ, res_ref_x / res_targ_x, res_ref_y / res_targ_y,
+            downsampled_img = perform_downsample(image_targ, res_ref_x / res_targ_x, res_ref_y / res_targ_y,
                                                      os.path.split(image_targ)[1][:-4] + "_downsample.tif",
-                                                     outdir=outdir)
+                                                 outdir=outdir)
 
     # note on next line: downsampled_img may or may not exist, depending if downsampling occurred.
     # trim_out[1:3] are all strings which include file location.
     _, downsampled_img, cropped_img, original_target_img = trim_out  # downsampled_img has good alignment
-    downsampled_img = perform_downsample_rio(image_targ, res_ref_x/res_targ_x, res_ref_y/res_targ_y,
+    downsampled_img = perform_downsample(image_targ, res_ref_x / res_targ_x, res_ref_y / res_targ_y,
                                              os.path.split(image_targ)[1][:-4] + "_downsample.tif", outdir=outdir)
     if not allowDownsample:
         downsampled_img = original_target_img
@@ -911,7 +881,7 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
     # to make this a neat duplicate of the previous method, set_no_data expects veg mask to be an array, not a file
     # resolution in the following call assumes square pixels
     if allowDownsample:
-        veg_mask_downsamp = perform_downsample_rio(veg_mask_full_res_img, res_ref_x/res_targ_x, res_ref_y/res_targ_y,
+        veg_mask_downsamp = perform_downsample(veg_mask_full_res_img, res_ref_x / res_targ_x, res_ref_y / res_targ_y,
                                                    "veg_mask_downsample.tif", outdir=outdir)
     else:
         veg_mask_downsamp = veg_mask_full_res_img
@@ -967,14 +937,14 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
                 merged_udm = os.path.join(os.path.split(udm[0])[0], "merged_udm.tif")
             udm_merger(udm, merged_udm)
             # check if the merged UDM is in the same projection as the final image
-            merged_udm = projection_check(normalized_fsoutfile, merged_udm)
+            merged_udm = projection_match(normalized_fsoutfile, merged_udm)
             udm_as_arr = img_to_array(merged_udm)
             final_images = set_no_data(udm_as_arr, normalized_fsoutfile, outfile_final, src_nodata=1.0,
                                        dst_nodata=dst_nodataval, save_mask=True)
         elif type(udm) == str:
             # assume that if we got a string, it is a single default UDM filepath that still must be processed.
             process_udm(udm, src_nodata=1.0)
-            udm = projection_check(normalized_fsoutfile, udm)
+            udm = projection_match(normalized_fsoutfile, udm)
             udm_as_arr = img_to_array(udm)
             final_images = set_no_data(udm_as_arr, normalized_fsoutfile, outfile_final, src_nodata=1.0,
                                        dst_nodata=dst_nodataval, save_mask=True)
