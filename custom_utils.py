@@ -24,9 +24,9 @@ from shapely.geometry import shape
 from gdalconst import GA_ReadOnly
 from subprocess import call
 import time
-import arosics
 from iMad import run_MAD
 from radcal import run_radcal
+
 warnings.filterwarnings("ignore", message="numpy.dtype size changed")
 warnings.filterwarnings("ignore", message="numpy.ufunc size changed")
 
@@ -35,7 +35,7 @@ def process_udm(udm_path, src_nodata=1.0):
     """
     Takes a default Planet Unusable Data Mask and compresses it to one bit, where everything originally = 1.0 or greater
         becomes nodata. Currently still saves as an 8bit file though.
-        NB: Important!! This edits the UDM in place!
+        NB: this edits the UDM in place
     :param udm_path:
     :param src_nodata:
     :return:
@@ -216,6 +216,7 @@ def check_for_clouds(directory=".", tolerance=0.5):
     :param directory: (string) directory containing JSON files with image metadata
     :return: usable: (boolean) True for a usable image, False otherwise.
     """
+    # TODO: move all PlanetScope-specific tools to another file
     cloud = []
     for dirpath, dirnames, filenames in os.walk(directory):
         for filename in [f for f in filenames if f.endswith("metadata.json")]:
@@ -241,6 +242,7 @@ def register_image2(target_img, reference_img, no_data_val=0.0, outdir=None):
     :param no_data_val: (float) no-data value for the target and reference images
     :return warped_out: filepath of coregistered version of target_image
     """
+    import arosics
     # this function uses arosics instead of arcpy to be open source. Results differ slightly but look comparable
     if outdir:
         direc = outdir
@@ -256,14 +258,15 @@ def register_image2(target_img, reference_img, no_data_val=0.0, outdir=None):
         return
     registered_img = arosics.COREG_LOCAL(reference_img, target_img, 300, path_out=warped_out,
                                          nodata=(no_data_val, no_data_val), fmt_out="GTiff",
-                                         projectDir=os.path.split(target_img)[0],
-                                         r_b4match=4, s_b4match=4, calc_corners=False, align_grids=False)
-    tie_points = registered_img.CoRegPoints_table
-    coreg_csv_name = os.path.split(target_img)[1][:-4] + "coreg_points.csv"
-    coreg_visual_name = os.path.split(target_img)[1] + "coreg_visual.png"
-    tie_points.to_csv(os.path.join(direc, coreg_csv_name), sep=",", index=False)
-    registered_img.view_CoRegPoints(savefigPath=os.path.join(direc, coreg_visual_name))
-    registered_img.correct_shifts()
+                                         projectDir=outdir, r_b4match=4, s_b4match=4,
+                                         calc_corners=False, align_grids=False)
+    coreg_csv_name = os.path.split(target_img)[1][:-4] + "_coreg_points.csv"
+    try:
+        tie_points = registered_img.CoRegPoints_table
+        tie_points.to_csv(os.path.join(direc, coreg_csv_name), sep=",", index=False)
+    except ImportError:
+        pass
+    registered_img.correct_shifts()  # move this to proceed calculating the points table?
     return warped_out
 
 
@@ -508,26 +511,31 @@ def set_no_data(img_w_nodata, cropped_img, outfile="out.tif", outdir=None, src_n
     """
     Takes in two images- one with no-data values around the perimeter, one without. Applies matching no-data values to the second image and saves as new output.
 
-    :param img_w_nodata: (string) filepath of Planet image containing some no-data values around the perimeter. Also supports numpy array.
-    :param cropped_img: (string) Must have the same bounding box as planet_img, but can have data everywhere. No-data values from planet_img will be added to cropped_img (no overwrite)
+    :param img_w_nodata: (string) filepath of target image containing some no-data values around the perimeter. Also supports numpy array.
+    :param cropped_img: (string) Must have the same bounding box as img_w_nodata, but can have data everywhere. No-data values from img_w_nodata will be added to cropped_img (no overwrite)
     :param outfile: (string) name of output file. DO NOT ADD LOCATION. File location will be added later.
     :param outdir: (str) directory to save output file
     :param src_nodata: (float) the no-data value in the incoming image.
     :param dst_nodata: (float) the no-data value in the output image.
     :param save_mask: (bool) save the mask as a GeoTiff
     :param datatype_out: (gdal datatype) desired filetype for the output file
-    :return planet image: unchanged from input
+    :return img_nodata_source: unchanged from input
     :return outfile: (string) filepath of image with no-data values applied
+    :return no_data_mask:
     """
 
     # array version:
     if (type(img_w_nodata) == np.ndarray) or (type(img_w_nodata) == np.ma.core.MaskedArray):
         # this is the case where the inputs are arrays
         # this is essentially just for the vegetation mask (single band) at the moment
+        # TODO: switch this to rasterio also
         gdal.AllRegister()
         img_nodata_source = img_w_nodata      # the file with some no-data pixels that will be copied over.
         img_nodata_target = gdal.Open(cropped_img, gdal.GA_Update)  # file which will have no-data pixels added.
-        rows, cols = img_nodata_source.shape
+        if len(img_nodata_source.shape) == 3:
+            _, rows, cols = img_nodata_source.shape
+        else:
+            rows, cols = img_nodata_source.shape
         cols2 = img_nodata_target.RasterXSize
         rows2 = img_nodata_target.RasterYSize
         bands = img_nodata_target.RasterCount
@@ -585,8 +593,6 @@ def set_no_data(img_w_nodata, cropped_img, outfile="out.tif", outdir=None, src_n
         rows = planet.RasterYSize
         cols2 = target.RasterXSize
         rows2 = target.RasterYSize
-        if (cols != cols2) or (rows != rows2):
-            warnings.warn("size mismatch. use images with same dimensions.")
         rows = int(np.min((rows, rows2)))
         cols = int(np.min((cols, cols2)))
 
@@ -651,77 +657,15 @@ def set_no_data(img_w_nodata, cropped_img, outfile="out.tif", outdir=None, src_n
         return img_w_nodata, outfile, new_mask
 
 
-def scale_image(img_path, nodata, outdir=None, datatype_out=gdal.GDT_UInt16):
-    """
-    Scale the range of values for an image from 0-100.
-    First, sets the 2% lowest values to the 2% mark and the 2% highest values to the 98% mark.
-        # ALTERNATE VERSION: replaces the brightest values with nodata
-    Then takes the output, sets the lowest value to 0 and the highest to 100.
-    Writes a float.
-    :param img_path:
-    :param nodata: no-data value in input image
-    :param datatype_out: GDAL data type to save outputs, e.g. gdal.GDT_Float32.
-    :return:
-    """
-    gdal.AllRegister()
-    img_src = gdal.Open(img_path)
-    cols = img_src.RasterXSize
-    rows = img_src.RasterYSize
-    bands = img_src.RasterCount
-    count_thresh = 0.02
-
-    bands_array = []
-    nodata_array = np.zeros([rows, cols])    # will store locations where a pixel is no-data. If no-data, then 1.0.
-    for band in range(bands):
-        temp_array = np.array(img_src.GetRasterBand(band+1).ReadAsArray()).astype(np.float)
-        size = temp_array.size
-        upper_cutoff = np.sort(temp_array, axis=None)[int(size*(1-count_thresh))]
-        #lower_cutoff = np.sort(temp_array, axis=None)[int(size*count_thresh)]
-        #np.place(temp_array, temp_array>=upper_cutoff, upper_cutoff)
-        np.place(temp_array, temp_array >= upper_cutoff, nodata)
-        #np.place(temp_array, temp_array<=lower_cutoff, lower_cutoff)
-        #bands_array[:,:,band] = temp_array/upper_cutoff*100.
-        #bands_array[:, :, band] = temp_array / temp_array.max() * 100.     # maybe restore later
-        bands_array.append(temp_array / temp_array.max()*100.)
-        nodata_array = np.where(temp_array == nodata, 1.0, nodata_array)
-
-    # if a pixel is no-data in one band, set to no-data in all
-    for band in range(bands):
-        # np.place(bands_array[:,:,band], nodata_array==1.0, nodata)    # maybe restore later
-        np.place(bands_array[band], nodata_array==1.0, nodata)
-
-    if outdir:
-        dir_target = outdir
-    else:
-        dir_target = os.path.split(img_path)[0]
-    src_filename = os.path.split(img_path)[1]
-    outfile = os.path.join(dir_target, src_filename[:-4] + "_scaled.tif")
-    target_DS = gdal.GetDriverByName('GTiff').Create(outfile, cols, rows, bands, datatype_out)
-    for band in range(bands):
-        target_DS.GetRasterBand(band + 1).WriteArray(bands_array[band])
-    target_DS.SetGeoTransform(img_src.GetGeoTransform())
-    target_DS.SetProjection(img_src.GetProjection())
-    target_DS.FlushCache()
-    target_DS = None
-    img_src = None
-    return
-
-
 def img_to_array(img_path):
     """
     Returns a list of arrays for a multiband image. Returns a single numpy array for a single band image.
     :param img_path:
     :return:
     """
-    img_src = gdal.Open(img_path)
-    bands = img_src.RasterCount
-    if bands > 1:
-        bands_array = []
-        for band in range(bands):
-            bands_array.append(np.array(img_src.GetRasterBand(band+1).ReadAsArray()).astype(np.float))
-    else:
-        bands_array = np.array(img_src.GetRasterBand(1).ReadAsArray()).astype(np.float)
-    img_src = None
+    with rasterio.open(img_path, 'r') as src:
+        bands_array = src.read()
+
     return bands_array
 
 
@@ -797,50 +741,56 @@ def projection_check(image_1, image_2, outdir=None):
         return os.path.join(dir_target, image2_reprojected)
 
 
-def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegistration=False, view_radcal_fits=True,
+def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits=True,
          src_nodataval=0.0, dst_nodataval=0.0, udm=None, ndvi_thresh=0.0, nochange_thresh=0.95, outdir=None,
-         datatype_out=gdal.GDT_UInt16):
+         datatype_out=gdal.GDT_UInt16, is_ps=True):
     """
     Purpose: radiometrically calibrate a target image to a reference image.
     Optionally update the georeferencing in the target image.
     :param image_ref: (str) filepath of radiometry reference image
     :param image_reg_ref: (str) filepath of geolocation reference image
     :param image_targ: (str) filepath of target image
-    :param allowDownsample: (bool) whether the target image needs to be downsampled. Deprecated.
-    :param allowRegistration: (bool) whether the target image needs registration
+    :param allow_reg: (bool) whether the target image needs registration
     :param view_radcal_fits: (bool) whether the radcal fits should be displayed
     :param src_nodataval: (float) no-data value in the input images
     :param dst_nodataval: (float) no-data value to be applied to the output images
     :param udm: (list, tuple, or string) filepath of Unusable Data Mask(s) which will be applied to the final image
-    :param outdir: (str) folder to save all outputs.
+    :param outdir: (str) folder to save all outputs. Will be created if it does not exist.
     :param datatype_out: GDAL data type to save outputs, e.g. gdal.GDT_Float32.
+    :param is_ps: (bool) if the target image is from PlanetScope, PS-specific functions will be applied
     :return: outpath_final: (str) path to final output image.
     """
     start = time.time()
     # Step 0: check image metadata to see if it has an acceptable level of cloud.
     image_targ_dir = os.path.split(image_targ)[0]
-    below_cloud_thresh = check_for_clouds(image_targ_dir, tolerance=0.5)
-    if below_cloud_thresh == False:
-        print("Image is above cloud threshold. Either use a different image or increase threshold.")
-        cloudOverride = input("Override cloud threshold? y/n: ")
-        assert isinstance(cloudOverride, str)
-        if cloudOverride == "y":
-            print("Cloud threshold overridden. Proceeding with processing. ")
-        elif cloudOverride == "n":
-            print("Exiting. ")
-            return
-        else:
-            print("Must choose y or n. Try again.")
-            return
+    if is_ps:
+        try:
+            import planetscope_utilities as psu
+        except ImportError:
+            warnings.warn("is_ps == True, but cannot import planetscope_utilities. Proceeding without PS fucntions.")
+            is_ps = False
+    if is_ps:
+        below_cloud_thresh = check_for_clouds(image_targ_dir, tolerance=0.5)  #TODO move this func
+        if not below_cloud_thresh:
+            print("Image is above cloud threshold. Either use a different image or increase threshold.")
+            cloudOverride = input("Override cloud threshold? y/n: ")
+            assert isinstance(cloudOverride, str)
+            if cloudOverride == "y":
+                print("Cloud threshold overridden. Proceeding with processing. ")
+            elif cloudOverride == "n":
+                print("Exiting. ")
+                return
+            else:
+                print("Must choose y or n. Try again.")
+                return
     # create output directory if it does not yet exist
     if outdir:
         if not os.path.isdir(outdir):
             print("Making the output directory " + outdir)
             os.mkdir(outdir)
-    else:
-        print("Not making an output directory. ")
 
     # Step 0.5: check to make sure all input images are in the same projection
+    # TODO: pull this from rasterio instead
     rad_ref_DS = gdal.Open(image_ref)
     reg_ref_DS = gdal.Open(image_reg_ref)
     target_DS = gdal.Open(image_targ)
@@ -853,7 +803,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
     if (rad_ref_srs == reg_ref_srs == target_srs):
         print("All projections are the same. Good. ")
     else:
-        warnings.warn("Oh no! The projections are different! Attemping to fix that. ")
+        warnings.warn("The projections are different. Attemping to fix that. ")
         print("Projection of the radiometric reference: " + str('EPSG:'+rad_ref_srs))
         print("Projection of the registration reference: " + str('EPSG:'+reg_ref_srs))
         print("Projection of the target image: " + str('EPSG:'+target_srs))
@@ -876,6 +826,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
     # while the files are open, also grab resolution and number of bands
     bands_ref = rad_ref_DS.RasterCount
     bands_targ = target_DS.RasterCount
+    # TODO: use a safer method to do this. rasterio
     res_ref_x = abs(rad_ref_DS.GetGeoTransform()[1])
     res_ref_y = abs(rad_ref_DS.GetGeoTransform()[5])
     res_targ_x = abs(target_DS.GetGeoTransform()[1])
@@ -895,7 +846,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
     trim_out = trim_to_image(image_reg_ref, image_targ, allow_downsample=False, outdir=outdir)
 
     # Step 2: align the Planet image to that snip (if permitted).
-    if allowRegistration:
+    if allow_reg:
         image2_aligned = register_image2(image_targ, trim_out[2], outdir=outdir)
         # out is a full-resolution image. 2nd arg is cropped reference image.
     else:
@@ -923,11 +874,11 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
 
     # note on next line: downsampled_img may or may not exist, depending if downsampling occurred.
     # trim_out[1:3] are all strings which include file location.
-    _, downsampled_img, cropped_img, original_planet_img = trim_out  # downsampled_img has good alignment
+    _, downsampled_img, cropped_img, original_target_img = trim_out  # downsampled_img has good alignment
     downsampled_img = perform_downsample_rio(image_targ, res_ref_x/res_targ_x, res_ref_y/res_targ_y,
                                              os.path.split(image_targ)[1][:-4] + "_downsample.tif", outdir=outdir)
     if not allowDownsample:
-        downsampled_img = original_planet_img
+        downsampled_img = original_target_img
 
     # Step 3.5: check if the radiometric reference image snip is actually smaller than the target image.
     # if so, trim the target image down to the size of the reference image snip.
@@ -946,7 +897,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
         image2_aligned = clip_to_shapefile(image2_aligned, shapefile_path, force_dims=cropped_dimensions,
                                            outname=clipped_fullres_target_name, outdir=outdir)
 
-    # Step 4: generate a veg mask at Planet resolution, downsample and apply, but save full res for later
+    # Step 4: generate a veg mask at target image resolution, downsample and apply, but save full res for later
     # TODO: swap this to a mask layer rather than assigning no-data values
     VI_calc_out_full_res = calc_VIs(image2_aligned, nodataval=dst_nodataval)
     ndvi_full_res = VI_calc_out_full_res[0]
@@ -965,7 +916,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
     else:
         veg_mask_downsamp = veg_mask_full_res_img
     veg_mask_downsamp_arr = img_to_array(veg_mask_downsamp)
-    target_downsamp_vegmasked = set_no_data(veg_mask_downsamp_arr, downsampled_img, outfile="planet_with_veg_mask.tif",
+    target_downsamp_vegmasked = set_no_data(veg_mask_downsamp_arr, downsampled_img, outfile="target_with_veg_mask.tif",
                                             outdir=outdir, src_nodata=dst_nodataval, dst_nodata=dst_nodataval,
                                             datatype_out=datatype_out)[1]
 
@@ -976,12 +927,12 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
     no_data_out_vegmask = set_no_data(target_downsamp_vegmasked, cropped_img, reference_nodata, outdir=outdir,
                                       dst_nodata=dst_nodataval)
 
-    # at this point, we have a Planet image at Landsat resolution and a Landsat image with Planet no-data values.
+    # at this point, we have a target image at reference image resolution and a ref image with target no-data values.
     # everything we need for MAD + radcal to run
-    # planet_img = downsampled version of planet at this point
-    target_img_novegmask = no_data_out_novegmask[0]  # note that planet_img and landsat_img include paths
+    # target_img = downsampled version of planet at this point
+    target_img_novegmask = no_data_out_novegmask[0]  # note that target_img and landsat_img include paths
     reference_img_novegmask = no_data_out_novegmask[1]
-    target_img_vegmask = no_data_out_vegmask[0]  # note that planet_img and landsat_img include paths
+    target_img_vegmask = no_data_out_vegmask[0]  # note that target_img and landsat_img include paths
     reference_img_vegmask = no_data_out_vegmask[1]
 
     end = time.time()
@@ -993,7 +944,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
     outfile_RAD = os.path.split(target_img_novegmask)[1][:-4] + "_RAD.tif"
     outfile_final = os.path.split(image_targ)[1][:-4] + "_FINAL.tif"
     run_MAD(target_img_vegmask, reference_img_vegmask, outfile_MAD, outdir=outdir)
-    # image2_aligned is the full resolution Planet scene
+    # image2_aligned is the full resolution target scene
     print("Beginning radcal...")
     print("Target image: " + os.path.split(target_img_novegmask)[1])
     print("Reference image: " + os.path.split(reference_img_novegmask)[1])
@@ -1003,6 +954,7 @@ def main(image_ref, image_reg_ref, image_targ, allowDownsample=True, allowRegist
     # Step 6: re-apply no-data values to the radiometrically corrected full-resolution planet image
     # necessary since radcal applies the correction to the no-data areas
     if udm:
+        # Based on the PlanetScope UDM
         # Documentation on Planet UDM doesn't seem to agree with actual values:
         # https://assets.planet.com/docs/Planet_Combined_Imagery_Product_Specs_letter_screen.pdf
         if (type(udm) == list) or (type(udm) == tuple):
@@ -1088,5 +1040,5 @@ if __name__ == '__main__':
     else:
         print("Must choose y or n. Try again.")
         quit()
-    main(image1, image_reg_ref, image2, udm=udm, allowDownsample=True, allowRegistration=allowRegistration,
+    main(image1, image_reg_ref, image2, udm=udm, allow_reg=allowRegistration,
          view_radcal_fits=view_radcal_fits, outdir=output_dir)
