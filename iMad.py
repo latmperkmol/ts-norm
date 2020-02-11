@@ -239,9 +239,6 @@ class Cpm(object):
         self.sw = 0.0000001
 
     def update(self, Xs, Ws=None):
-        # testing a version of update that eschews the provisional means dll
-        # it will be less efficient but easier to troubleshoot and implement
-        # reference Nick Leach's python implementation provisional_means
         n, N = np.shape(Xs)
         if Ws is None:
             Ws = np.ones(n)
@@ -294,14 +291,13 @@ def provisional_means(Xs, Ws, NN, n, sw, mn, cov):
     """
     Provisional means algorithm, adapted from C++ code written by Mort Canty
     In original script, Xs is pointer, Ws is pointer, NN is int, n is int, sw is double, mn is pointer, cov is pointer.
-    Written by Nick Leach
-    :param Xs: (numpy array) input array with data values. Must be 1D??
-    :param Ws: (numpy array) weights of the input values??
+    :param Xs: (numpy array) input array with data values.
+    :param Ws: (numpy array) weights of the input values.
     :param NN: (int) columns of Xs
     :param n: (int) rows of Xs
     :param sw: (float, I think) offset parameter or something. Probably stands for "sum of the weights"
-    :param mn: (numpy array) empty 1D numpy array with length N. Will store means.
-    :param cov: (numpy array) empty 2D numpy array with dimensions n, N
+    :param mn: (numpy array) empty 1D numpy array with length NN. Will store means.
+    :param cov: (numpy array) empty 2D numpy array with dimensions n, NN
     :return:
     """
     d = np.zeros(n*NN)  # empty array
