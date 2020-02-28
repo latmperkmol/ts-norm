@@ -207,13 +207,14 @@ def calc_img_stats(img_tif):
     return stats
 
 
-def register_image2(target_img, reference_img, no_data_val=0.0, outdir=None):
+def register_image2(target_img, reference_img, no_data_val=0.0, coreg_method='local', outdir=None):
     """
     Using AROSICS, perform co-registration. Generates and saves a CSV of the tie-points and their shift vectors.
     Also creates a visualization of how the co-registered image has shifted.
     :param target_img: image to have geospatial referencing updated
     :param reference_img: image with target geospatial referencing
     :param no_data_val: (float) no-data value for the target and reference images
+    :param coreg_method: (str) which coregistration method to use in AROSICS. Options are 'local' (default) and 'global'
     :return warped_out: filepath of coregistered version of target_image
     """
     import arosics
@@ -230,6 +231,7 @@ def register_image2(target_img, reference_img, no_data_val=0.0, outdir=None):
     else:
         print("Input image must be a GeoTiff. Exiting.")
         return
+    # TODO: swap to global coregistration based on Cooley et al 2017, which suggests systematic offsets.
     registered_img = arosics.COREG_LOCAL(reference_img, target_img, 300, path_out=warped_out,
                                          nodata=(no_data_val, no_data_val), fmt_out="GTiff",
                                          projectDir=outdir, r_b4match=4, s_b4match=4,
