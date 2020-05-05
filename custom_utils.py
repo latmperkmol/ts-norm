@@ -716,8 +716,8 @@ def projection_match(image_1, image_2, outdir=None):
         return os.path.join(dir_target, image2_reprojected)
 
 
-def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits=True,
-         src_nodataval=0.0, dst_nodataval=0.0, udm=None, ndvi_thresh=0.0, nochange_thresh=0.95, outdir=None,
+def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits=True, dst_nodataval=0.0,
+         udm=None, ndvi_thresh=0.0, nochange_thresh=0.95, outdir=None,
          datatype_out=gdal.GDT_UInt16, is_ps=True):
     """
     Purpose: radiometrically calibrate a target image to a reference image.
@@ -727,7 +727,6 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
     :param image_targ: (str) filepath of target image
     :param allow_reg: (bool) whether the target image needs registration
     :param view_radcal_fits: (bool) whether the radcal fits should be displayed
-    :param src_nodataval: (float) no-data value in the input images
     :param dst_nodataval: (float) no-data value to be applied to the output images
     :param udm: (list, tuple, or string) filepath of Unusable Data Mask(s) which will be applied to the final image
     :param ndvi_thresh: (float) values -1.0 to 1.0 are valid. Any pixels with NDVI below set threshold will be masked.
@@ -738,6 +737,14 @@ def main(image_ref, image_reg_ref, image_targ, allow_reg=False, view_radcal_fits
     :return: outpath_final: (str) path to final output image.
     """
     start = time.time()
+    # check for spaces in filenames
+    if ' ' in image_ref:
+        warnings.warn("Whitespace in path {} might cause issues.".format(image_ref))
+    if ' ' in image_reg_ref:
+        warnings.warn("Whitespace in path {} might cause issues.".format(image_reg_ref))
+    if ' ' in image_targ:
+        warnings.warn("Whitespace in path {} might cause issues.".format(image_targ))
+
     # Step 0: check image metadata to see if it has an acceptable level of cloud.
     image_targ_dir = os.path.split(image_targ)[0]
     if is_ps:
